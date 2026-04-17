@@ -1,4 +1,4 @@
-import { NewsCategory } from '../../src/types'
+import { NewsCategory } from '../../shared/types'
 
 export class CategoryService {
   private static categories: NewsCategory[] = []

@@ -1,10 +1,11 @@
 import { useState } from 'react'
-import { Link, useLocation } from 'react-router-dom'
-import { MessageSquare, Newspaper, Settings, Bot, Server, ChevronDown, ChevronUp } from 'lucide-react'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { MessageSquare, Newspaper, Settings, Bot, Server, ChevronDown, ChevronUp, LogOut } from 'lucide-react'
 import { clearAuthSession } from '@/lib/auth'
 
 export function Sidebar() {
   const location = useLocation()
+  const navigate = useNavigate()
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
 
   const menuItems = [
@@ -54,8 +55,8 @@ export function Sidebar() {
       </nav>
 
       <div className="p-4 border-t border-gray-200">
-        <div 
-          className="flex items-center justify-between gap-3 px-4 py-3 text-gray-600 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors"
+        <button 
+          className="w-full flex items-center justify-between gap-3 px-4 py-3 text-gray-600 hover:bg-gray-50 rounded-lg transition-colors"
           onClick={() => setIsSettingsOpen(!isSettingsOpen)}
         >
           <div className="flex items-center gap-3">
@@ -63,7 +64,7 @@ export function Sidebar() {
             <span>设置</span>
           </div>
           {isSettingsOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-        </div>
+        </button>
 
         {isSettingsOpen && (
           <div className="mt-2 space-y-1">
@@ -90,20 +91,17 @@ export function Sidebar() {
 
             <div className="border-t border-gray-100 my-2"></div>
 
-            <div 
-              className="flex items-center gap-3 px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg cursor-pointer transition-colors"
+            <button 
+              className="w-full flex items-center gap-3 px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
               onClick={() => {
                 clearAuthSession()
-                window.location.href = '/login'
+                navigate('/login')
               }}
+              aria-label="登出"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-                <polyline points="16 17 21 12 16 7"/>
-                <line x1="21" y1="12" x2="9" y2="12"/>
-              </svg>
+              <LogOut className="w-4 h-4" />
               <span className="text-sm">登出</span>
-            </div>
+            </button>
           </div>
         )}
       </div>

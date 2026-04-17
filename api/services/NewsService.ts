@@ -1,18 +1,12 @@
-import { NewsArticle, UserProfile } from '../../src/types'
-import { ConfigService } from './ConfigService'
-
-interface NewsAPIConfig {
-  provider: 'newsapi' | 'guardian' | 'nytimes'
-  apiKey: string
-  baseUrl?: string
-}
+import { NewsArticle, UserProfile } from '../../shared/types'
+import { AICrawlerService } from './AICrawlerService'
 
 export class NewsService {
   private static newsArticles: NewsArticle[] = []
-  private configService: ConfigService
+  private aiCrawlerService: AICrawlerService
 
   constructor() {
-    this.configService = new ConfigService()
+    this.aiCrawlerService = new AICrawlerService()
     // 初始化一些模拟数据
     if (NewsService.newsArticles.length === 0) {
       this.initializeMockData()
@@ -54,178 +48,24 @@ export class NewsService {
     ]
   }
 
-  private async fetchJsonWithTimeout(url: string, timeoutMs: number = 12000) {
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
-
-    try {
-      const response = await fetch(url, {
-        signal: controller.signal,
-        headers: {
-          'User-Agent': 'AINews/1.0',
-        },
-      })
-
-      const data = await response.json().catch(() => null)
-
-      return { response, data }
-    } finally {
-      clearTimeout(timeoutId)
-    }
-  }
-
-  // 调用 NewsAPI
-  private async fetchFromNewsAPI(
-    config: NewsAPIConfig,
-    userProfile?: UserProfile
-  ): Promise<NewsArticle[]> {
-    const baseUrl = config.baseUrl || 'https://newsapi.org/v2'
-    const keywords = userProfile?.keywords || ['technology', 'business']
-    const industries = userProfile?.industries || ['科技']
-    
-    const query = keywords.length > 0 ? keywords.join(' OR ') : 'technology'
-    
-    try {
-      const requestUrl = `${baseUrl}/top-headlines?country=us&apiKey=${config.apiKey}&q=${encodeURIComponent(query)}&pageSize=20`
-      const { response, data } = await this.fetchJsonWithTimeout(requestUrl)
-
-      if (!response.ok) {
-        const remoteMessage = data?.message ? `: ${data.message}` : ''
-        throw new Error(`NewsAPI 请求失败 ${response.status}${remoteMessage}`)
-      }
-      
-      if (data.articles && Array.isArray(data.articles)) {
-        return data.articles.map((article: any, index: number) => ({
-          id: `newsapi-${index}-${Date.now()}`,
-          title: article.title || '无标题',
-          content: article.description || article.content || '',
-          source: article.source?.name || '未知来源',
-          url: article.url || '',
-          publishedAt: article.publishedAt || new Date().toISOString(),
-          relatedIndustries: industries,
-          relatedKeywords: keywords,
-        }))
-      }
-      
-      return []
-    } catch (error) {
-      console.error('NewsAPI 调用错误:', error)
-      throw error
-    }
-  }
-
-  // 调用 The Guardian API
-  private async fetchFromGuardianAPI(
-    config: NewsAPIConfig,
-    userProfile?: UserProfile
-  ): Promise<NewsArticle[]> {
-    const baseUrl = config.baseUrl || 'https://content.guardianapis.com'
-    const keywords = userProfile?.keywords || ['technology', 'business']
-    
-    const query = keywords.length > 0 ? keywords.join(' OR ') : 'technology'
-    
-    try {
-      const requestUrl = `${baseUrl}/search?api-key=${config.apiKey}&q=${encodeURIComponent(query)}&show-fields=headline,trailText,webUrl,publicationDate&page-size=20`
-      const { response, data } = await this.fetchJsonWithTimeout(requestUrl)
-
-      if (!response.ok) {
-        const remoteMessage = data?.message ? `: ${data.message}` : ''
-        throw new Error(`Guardian API 请求失败 ${response.status}${remoteMessage}`)
-      }
-      
-      if (data.response?.results && Array.isArray(data.response.results)) {
-        return data.response.results.map((article: any, index: number) => ({
-          id: `guardian-${index}-${Date.now()}`,
-          title: article.fields?.headline || article.webTitle || '无标题',
-          content: article.fields?.trailText || '',
-          source: 'The Guardian',
-          url: article.fields?.webUrl || article.webUrl || '',
-          publishedAt: article.fields?.publicationDate || article.webPublicationDate || new Date().toISOString(),
-          relatedIndustries: userProfile?.industries || [],
-          relatedKeywords: keywords,
-        }))
-      }
-      
-      return []
-    } catch (error) {
-      console.error('Guardian API 调用错误:', error)
-      throw error
-    }
-  }
-
-  // 调用 New York Times API
-  private async fetchFromNYTAPI(
-    config: NewsAPIConfig,
-    userProfile?: UserProfile
-  ): Promise<NewsArticle[]> {
-    const baseUrl = config.baseUrl || 'https://api.nytimes.com/svc/search/v2'
-    const keywords = userProfile?.keywords || ['technology', 'business']
-    
-    const query = keywords.length > 0 ? keywords.join(' OR ') : 'technology'
-    
-    try {
-      const requestUrl = `${baseUrl}/articlesearch.json?api-key=${config.apiKey}&q=${encodeURIComponent(query)}&fl=headline,abstract,web_url,pub_date,source&page=0`
-      const { response, data } = await this.fetchJsonWithTimeout(requestUrl)
-
-      if (!response.ok) {
-        const remoteMessage = data?.fault?.faultstring ? `: ${data.fault.faultstring}` : ''
-        throw new Error(`NYT API 请求失败 ${response.status}${remoteMessage}`)
-      }
-      
-      if (data.response?.docs && Array.isArray(data.response.docs)) {
-        return data.response.docs.map((article: any, index: number) => ({
-          id: `nyt-${index}-${Date.now()}`,
-          title: article.headline?.main || '无标题',
-          content: article.abstract || '',
-          source: article.source || 'New York Times',
-          url: article.web_url || '',
-          publishedAt: article.pub_date || new Date().toISOString(),
-          relatedIndustries: userProfile?.industries || [],
-          relatedKeywords: keywords,
-        }))
-      }
-      
-      return []
-    } catch (error) {
-      console.error('NYT API 调用错误:', error)
-      throw error
-    }
-  }
-
   // 获取最近新闻
   async getRecentNews(
     userId?: string,
     userProfile?: UserProfile
   ): Promise<NewsArticle[]> {
-    if (userId) {
-      try {
-        const config = await this.configService.getConfig(userId)
-        
-        if (config.newsAPI?.apiKey) {
-          let articles: NewsArticle[] = []
-          
-          switch (config.newsAPI.provider) {
-            case 'newsapi':
-              articles = await this.fetchFromNewsAPI(config.newsAPI, userProfile)
-              break
-            case 'guardian':
-              articles = await this.fetchFromGuardianAPI(config.newsAPI, userProfile)
-              break
-            case 'nytimes':
-              articles = await this.fetchFromNYTAPI(config.newsAPI, userProfile)
-              break
-          }
-          
-          if (articles.length > 0) {
-            NewsService.newsArticles = articles
-            return articles
-          }
-        }
-      } catch (error) {
-        console.error('获取真实新闻失败，使用模拟数据:', error)
+    try {
+      // 使用 AI 爬虫服务获取新闻
+      const crawlResult = await this.aiCrawlerService.crawlNews(userProfile, userId)
+
+      if (crawlResult.success && crawlResult.articles.length > 0) {
+        NewsService.newsArticles = crawlResult.articles
+        // 随机返回6条新闻
+        return this.aiCrawlerService.getRandomNews(6)
       }
+    } catch (error) {
+      console.error('爬虫获取新闻失败，使用模拟数据:', error)
     }
-    
+
     // 模拟根据用户兴趣过滤新闻
     return NewsService.newsArticles
   }
@@ -233,13 +73,12 @@ export class NewsService {
   // 更新新闻源
   async updateNewsFeeds(userId?: string, userProfile?: UserProfile): Promise<void> {
     console.log('Updating news feeds...')
-    
-    if (userId) {
-      try {
-        await this.getRecentNews(userId, userProfile)
-      } catch (error) {
-        console.error('更新新闻源失败:', error)
-      }
+
+    try {
+      // 使用 AI 爬虫服务更新新闻
+      await this.aiCrawlerService.crawlNews(userProfile, userId)
+    } catch (error) {
+      console.error('更新新闻源失败:', error)
     }
   }
 
@@ -248,34 +87,21 @@ export class NewsService {
     return NewsService.newsArticles.find((news: NewsArticle) => news.id === id) || null
   }
 
-  // 测试新闻 API 连接
-  async testNewsAPI(config: NewsAPIConfig): Promise<{ success: boolean; message: string }> {
+  // 测试爬虫连接
+  async testNewsAPI(_config: any): Promise<{ success: boolean; message: string }> {
     try {
-      let testArticles: NewsArticle[] = []
-      
-      switch (config.provider) {
-        case 'newsapi':
-          testArticles = await this.fetchFromNewsAPI(config)
-          break
-        case 'guardian':
-          testArticles = await this.fetchFromGuardianAPI(config)
-          break
-        case 'nytimes':
-          testArticles = await this.fetchFromNYTAPI(config)
-          break
-      }
-      
-      if (testArticles.length > 0) {
-        return { success: true, message: `连接成功！获取到 ${testArticles.length} 条新闻` }
-      } else {
-        return { success: false, message: '连接成功，但没有获取到新闻' }
-      }
+      return await this.aiCrawlerService.testCrawler()
     } catch (error) {
       const message =
-        error instanceof Error && error.name === 'AbortError'
-          ? '连接超时，请检查当前网络环境是否允许访问 NewsAPI'
-          : `连接失败: ${(error as Error).message}`
+        error instanceof Error
+          ? `连接失败: ${error.message}`
+          : '连接失败: 未知错误'
       return { success: false, message }
     }
+  }
+
+  // 获取支持的新闻源列表
+  getSupportedProviders() {
+    return ['AI 爬虫']
   }
 }

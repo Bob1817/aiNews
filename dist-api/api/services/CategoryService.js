@@ -91,9 +91,5 @@ class CategoryService {
     }
 }
 exports.CategoryService = CategoryService;
-Object.defineProperty(CategoryService, "categories", {
-    enumerable: true,
-    configurable: true,
-    writable: true,
-    value: []
-});
+CategoryService.categories = [];
+//# sourceMappingURL=CategoryService.js.map

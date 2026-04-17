@@ -7,30 +7,6 @@ const PublishService_1 = require("../services/PublishService");
 const UserService_1 = require("../services/UserService");
 class NewsController {
     constructor() {
-        Object.defineProperty(this, "newsService", {
-            enumerable: true,
-            configurable: true,
-            writable: true,
-            value: void 0
-        });
-        Object.defineProperty(this, "savedNewsService", {
-            enumerable: true,
-            configurable: true,
-            writable: true,
-            value: void 0
-        });
-        Object.defineProperty(this, "publishService", {
-            enumerable: true,
-            configurable: true,
-            writable: true,
-            value: void 0
-        });
-        Object.defineProperty(this, "userService", {
-            enumerable: true,
-            configurable: true,
-            writable: true,
-            value: void 0
-        });
         this.newsService = new NewsService_1.NewsService();
         this.savedNewsService = new SavedNewsService_1.SavedNewsService();
         this.publishService = new PublishService_1.PublishService();
@@ -216,3 +192,4 @@ class NewsController {
     }
 }
 exports.NewsController = NewsController;
+//# sourceMappingURL=NewsController.js.map

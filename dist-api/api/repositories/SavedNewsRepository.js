@@ -4,12 +4,7 @@ exports.SavedNewsRepository = void 0;
 const database_1 = require("../config/database");
 class SavedNewsRepository {
     constructor() {
-        Object.defineProperty(this, "supabase", {
-            enumerable: true,
-            configurable: true,
-            writable: true,
-            value: (0, database_1.getSupabaseClient)()
-        });
+        this.supabase = (0, database_1.getSupabaseClient)();
     }
     // 获取用户保存的所有新闻
     async getSavedNews(userId) {
@@ -186,3 +181,4 @@ class SavedNewsRepository {
     }
 }
 exports.SavedNewsRepository = SavedNewsRepository;
+//# sourceMappingURL=SavedNewsRepository.js.map

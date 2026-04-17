@@ -5,18 +5,6 @@ const NewsService_1 = require("./NewsService");
 const ConfigService_1 = require("./ConfigService");
 class AIService {
     constructor() {
-        Object.defineProperty(this, "newsService", {
-            enumerable: true,
-            configurable: true,
-            writable: true,
-            value: void 0
-        });
-        Object.defineProperty(this, "configService", {
-            enumerable: true,
-            configurable: true,
-            writable: true,
-            value: void 0
-        });
         this.newsService = new NewsService_1.NewsService();
         this.configService = new ConfigService_1.ConfigService();
     }
@@ -112,19 +100,24 @@ class AIService {
         try {
             const config = await this.getAIConfig(userId);
             let response;
+            console.log('AI 配置:', { provider: config.provider, hasApiKey: !!config.apiKey, modelName: config.modelName });
             if (config.provider === 'ollama') {
+                console.log('使用 Ollama API');
                 response = await this.callOllamaAPI(config, fullPrompt, systemPrompt);
             }
-            else if (config.provider === 'openai' && config.apiKey) {
+            else if (config.provider === 'openai' && config.apiKey && config.apiKey !== 'sk-...') {
+                console.log('使用 OpenAI API');
                 response = await this.callOpenAIAPI(config, fullPrompt, systemPrompt);
             }
             else {
+                console.log('没有有效配置，使用模拟响应');
                 // 如果没有配置API Key或使用其他提供商，使用模拟响应
                 throw new Error('使用模拟响应');
             }
             return { content: response };
         }
         catch (error) {
+            console.error('AI 对话调用失败:', error);
             // API调用失败时使用模拟响应
             let response = '';
             if (referencedNewsId) {
@@ -155,13 +148,17 @@ class AIService {
         try {
             const config = await this.getAIConfig(userId);
             let response;
+            console.log('AI 创作配置:', { provider: config.provider, hasApiKey: !!config.apiKey, modelName: config.modelName });
             if (config.provider === 'ollama') {
+                console.log('使用 Ollama API 进行创作');
                 response = await this.callOllamaAPI(config, fullPrompt, systemPrompt);
             }
-            else if (config.provider === 'openai' && config.apiKey) {
+            else if (config.provider === 'openai' && config.apiKey && config.apiKey !== 'sk-...') {
+                console.log('使用 OpenAI API 进行创作');
                 response = await this.callOpenAIAPI(config, fullPrompt, systemPrompt);
             }
             else {
+                console.log('没有有效配置，使用模拟响应进行创作');
                 throw new Error('使用模拟响应');
             }
             // 尝试从响应中提取标题
@@ -170,6 +167,7 @@ class AIService {
             return { title, content: response };
         }
         catch (error) {
+            console.error('AI 创作调用失败:', error);
             // API调用失败时使用模拟响应
             const title = `AI 创作：${prompt}`;
             const content = `# ${title}\n\n${prompt}\n\n${referencedContent ? `## 参考信息\n\n${referencedContent}` : ''}\n\n本文由 AI 基于最新新闻内容创作，提供了对相关话题的深度分析和见解。`;
@@ -178,3 +176,4 @@ class AIService {
     }
 }
 exports.AIService = AIService;
+//# sourceMappingURL=AIService.js.map

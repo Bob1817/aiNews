@@ -1,5 +1,5 @@
 import { randomBytes, scryptSync, timingSafeEqual } from 'crypto'
-import { User, UserProfile } from '../../src/types'
+import { User, UserProfile } from '../../shared/types'
 import { UserRepository } from '../repositories/UserRepository'
 
 export class UserService {

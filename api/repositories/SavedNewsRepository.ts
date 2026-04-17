@@ -1,5 +1,5 @@
 import { getSupabaseClient } from '../config/database'
-import { SavedNews } from '../../src/types'
+import { SavedNews } from '../../shared/types'
 
 export class SavedNewsRepository {
   private supabase = getSupabaseClient()

@@ -17,3 +17,4 @@ router.put('/profile', (req, res) => userController.updateProfile(req, res));
 router.post('/register', (req, res) => userController.register(req, res));
 // 用户登录
 router.post('/login', (req, res) => userController.login(req, res));
+//# sourceMappingURL=user.js.map

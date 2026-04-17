@@ -4,12 +4,6 @@ exports.UserController = void 0;
 const UserService_1 = require("../services/UserService");
 class UserController {
     constructor() {
-        Object.defineProperty(this, "userService", {
-            enumerable: true,
-            configurable: true,
-            writable: true,
-            value: void 0
-        });
         this.userService = new UserService_1.UserService();
     }
     // 获取用户资料
@@ -57,3 +51,4 @@ class UserController {
     }
 }
 exports.UserController = UserController;
+//# sourceMappingURL=UserController.js.map

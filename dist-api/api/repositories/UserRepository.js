@@ -4,12 +4,7 @@ exports.UserRepository = void 0;
 const database_1 = require("../config/database");
 class UserRepository {
     constructor() {
-        Object.defineProperty(this, "supabase", {
-            enumerable: true,
-            configurable: true,
-            writable: true,
-            value: (0, database_1.getSupabaseClient)()
-        });
+        this.supabase = (0, database_1.getSupabaseClient)();
     }
     // 获取用户资料
     async getProfile(userId) {
@@ -101,3 +96,4 @@ class UserRepository {
     }
 }
 exports.UserRepository = UserRepository;
+//# sourceMappingURL=UserRepository.js.map

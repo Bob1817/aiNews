@@ -23,3 +23,4 @@ router.post('/publish/:id', (req, res) => newsController.publishNews(req, res));
 router.post('/update', (req, res) => newsController.updateNewsFeeds(req, res));
 // 测试新闻API连接
 router.post('/test-api', (req, res) => newsController.testNewsAPI(req, res));
+//# sourceMappingURL=news.js.map

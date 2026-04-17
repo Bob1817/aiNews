@@ -19,3 +19,4 @@ router.post('/', (req, res) => categoryController.createCategory(req, res));
 router.put('/:id', (req, res) => categoryController.updateCategory(req, res));
 // 删除分类
 router.delete('/:id', (req, res) => categoryController.deleteCategory(req, res));
+//# sourceMappingURL=category.js.map

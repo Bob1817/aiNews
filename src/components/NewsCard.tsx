@@ -16,11 +16,15 @@ export function NewsCard({ article, onQuote, isSelected }: NewsCardProps) {
     
     if (hours < 1) return '刚刚'
     if (hours < 24) return `${hours}小时前`
-    return date.toLocaleDateString('zh-CN')
+    return new Intl.DateTimeFormat('zh-CN', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    }).format(date)
   }
 
   return (
-    <div className={`bg-white rounded-xl border p-4 transition-all cursor-pointer ${
+    <div className={`bg-white rounded-xl border p-4 transition-colors transition-shadow transition-border-color cursor-pointer ${
       isSelected ? 'border-blue-500 ring-2 ring-blue-100' : 'border-gray-200 hover:border-blue-300 hover:shadow-md'
     }`}>
       <div className="flex items-start justify-between mb-3">
@@ -43,9 +47,9 @@ export function NewsCard({ article, onQuote, isSelected }: NewsCardProps) {
 
       <div className="flex items-center justify-between">
         <div className="flex gap-2">
-          {article.relatedKeywords.slice(0, 2).map((keyword) => (
+          {article.relatedKeywords.slice(0, 2).map((keyword, index) => (
             <span
-              key={keyword}
+              key={`${article.id}-${index}-${keyword}`}
               className="text-xs px-2 py-1 bg-gray-100 text-gray-600 rounded"
             >
               {keyword}
@@ -55,22 +59,24 @@ export function NewsCard({ article, onQuote, isSelected }: NewsCardProps) {
 
         <div className="flex gap-2">
           <a
-            href={article.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-          >
-            <ExternalLink className="w-4 h-4" />
-          </a>
-          {onQuote && (
-            <button
-              onClick={() => onQuote(article)}
-              className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-              title="引用此新闻"
+              href={article.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+              aria-label="打开原始链接"
             >
-              <Quote className="w-4 h-4" />
-            </button>
-          )}
+              <ExternalLink className="w-4 h-4" />
+            </a>
+            {onQuote && (
+              <button
+                onClick={() => onQuote(article)}
+                className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                title="引用此新闻"
+                aria-label="引用此新闻"
+              >
+                <Quote className="w-4 h-4" />
+              </button>
+            )}
         </div>
       </div>
     </div>

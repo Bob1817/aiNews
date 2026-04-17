@@ -1,4 +1,4 @@
-import { SavedNews } from '../../src/types'
+import { SavedNews } from '../../shared/types'
 
 export class SavedNewsService {
   private static savedNews: SavedNews[] = []

@@ -13,3 +13,4 @@ const aiController = new AIController_1.AIController();
 router.post('/chat', (req, res) => aiController.chat(req, res));
 // AI 新闻创作
 router.post('/compose', (req, res) => aiController.compose(req, res));
+//# sourceMappingURL=ai.js.map

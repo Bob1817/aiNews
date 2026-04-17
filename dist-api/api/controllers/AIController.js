@@ -4,12 +4,6 @@ exports.AIController = void 0;
 const AIService_1 = require("../services/AIService");
 class AIController {
     constructor() {
-        Object.defineProperty(this, "aiService", {
-            enumerable: true,
-            configurable: true,
-            writable: true,
-            value: void 0
-        });
         this.aiService = new AIService_1.AIService();
     }
     // AI 对话
@@ -36,3 +30,4 @@ class AIController {
     }
 }
 exports.AIController = AIController;
+//# sourceMappingURL=AIController.js.map

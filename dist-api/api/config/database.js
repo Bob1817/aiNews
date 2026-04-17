@@ -33,3 +33,4 @@ async function initializeDatabase() {
         console.log('数据库连接成功，表结构将在首次使用时创建（或已在 Supabase 控制台中创建）');
     }
 }
+//# sourceMappingURL=database.js.map

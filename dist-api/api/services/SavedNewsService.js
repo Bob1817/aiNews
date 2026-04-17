@@ -90,9 +90,5 @@ class SavedNewsService {
     }
 }
 exports.SavedNewsService = SavedNewsService;
-Object.defineProperty(SavedNewsService, "savedNews", {
-    enumerable: true,
-    configurable: true,
-    writable: true,
-    value: []
-});
+SavedNewsService.savedNews = [];
+//# sourceMappingURL=SavedNewsService.js.map

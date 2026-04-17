@@ -4,12 +4,6 @@ exports.CategoryController = void 0;
 const CategoryService_1 = require("../services/CategoryService");
 class CategoryController {
     constructor() {
-        Object.defineProperty(this, "categoryService", {
-            enumerable: true,
-            configurable: true,
-            writable: true,
-            value: void 0
-        });
         this.categoryService = new CategoryService_1.CategoryService();
     }
     // 获取所有分类
@@ -73,3 +67,4 @@ class CategoryController {
     }
 }
 exports.CategoryController = CategoryController;
+//# sourceMappingURL=CategoryController.js.map

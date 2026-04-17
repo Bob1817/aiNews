@@ -4,12 +4,6 @@ exports.PublishService = void 0;
 const SavedNewsService_1 = require("./SavedNewsService");
 class PublishService {
     constructor() {
-        Object.defineProperty(this, "savedNewsService", {
-            enumerable: true,
-            configurable: true,
-            writable: true,
-            value: void 0
-        });
         this.savedNewsService = new SavedNewsService_1.SavedNewsService();
     }
     // 发布新闻
@@ -51,3 +45,4 @@ class PublishService {
     }
 }
 exports.PublishService = PublishService;
+//# sourceMappingURL=PublishService.js.map

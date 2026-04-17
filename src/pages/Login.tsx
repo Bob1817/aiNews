@@ -80,6 +80,8 @@ export function Login() {
               </div>
               <input
                 type="email"
+                name="email"
+                autoComplete="email"
                 value={formData.email}
                 onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                 placeholder="请输入邮箱"
@@ -98,6 +100,8 @@ export function Login() {
               </div>
               <input
                 type={showPassword ? 'text' : 'password'}
+                name="password"
+                autoComplete="current-password"
                 value={formData.password}
                 onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                 placeholder="请输入密码"
@@ -107,6 +111,7 @@ export function Login() {
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
                 className="absolute inset-y-0 right-0 pr-3 flex items-center"
+                aria-label="切换密码可见性"
               >
                 {showPassword ? (
                   <EyeOff className="w-5 h-5 text-gray-400" />
@@ -131,7 +136,19 @@ export function Login() {
             </div>
 
             <div className="text-sm">
-              <a href="#" className="font-medium text-blue-600 hover:text-blue-500">
+              <a 
+                href="#" 
+                className="font-medium text-blue-600 hover:text-blue-500"
+                onClick={(e) => {
+                  e.preventDefault();
+                  // 这里可以添加忘记密码的逻辑
+                  showToast({
+                    title: '功能开发中',
+                    message: '忘记密码功能正在开发中，请稍后再试。',
+                    variant: 'info',
+                  });
+                }}
+              >
                 忘记密码？
               </a>
             </div>
@@ -147,7 +164,7 @@ export function Login() {
                 <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
               ) : (
                 <>
-                  <span>登录</span>
+                  <span>登录账号</span>
                   <ArrowRight className="w-4 h-4" />
                 </>
               )}

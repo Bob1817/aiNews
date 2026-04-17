@@ -1,4 +1,4 @@
-import { UserConfig } from '../../src/types'
+import { UserConfig } from '../../shared/types'
 
 export class ConfigService {
   private static userConfigs: UserConfig[] = []
@@ -16,10 +16,15 @@ export class ConfigService {
         id: '1',
         userId: '1',
         aiModel: {
-          provider: 'openai',
-          apiKey: 'sk-...',
-          modelName: 'gpt-3.5-turbo',
-          baseUrl: '',
+          provider: 'ollama',
+          apiKey: '',
+          modelName: 'gemma4:latest',
+          baseUrl: 'http://localhost:11434',
+        },
+        newsAPI: {
+          provider: 'newsapi',
+          apiKey: process.env.NEWSAPI_API_KEY || '70803be67f5d4647b6e54a35f0615d25',
+          baseUrl: 'https://newsapi.org/v2',
         },
         publishPlatforms: {
           website: {
@@ -42,18 +47,32 @@ export class ConfigService {
   async getConfig(userId: string): Promise<UserConfig> {
     const config = ConfigService.userConfigs.find((c) => c.userId === userId)
     if (config) {
+      // 确保有默认的 NewsAPI 配置
+      if (!config.newsAPI) {
+        config.newsAPI = {
+          provider: 'newsapi',
+          apiKey: process.env.NEWSAPI_API_KEY || '70803be67f5d4647b6e54a35f0615d25',
+          baseUrl: 'https://newsapi.org/v2',
+        }
+        config.updatedAt = new Date().toISOString()
+      }
       return config
     }
 
-    // 如果配置不存在，创建一个新的
+    // 如果配置不存在，创建一个新的（包含默认的 NewsAPI 配置）
     const newConfig: UserConfig = {
       id: Date.now().toString(),
       userId,
       aiModel: {
-        provider: 'openai',
+        provider: 'ollama',
         apiKey: '',
-        modelName: 'gpt-3.5-turbo',
-        baseUrl: '',
+        modelName: 'gemma4:latest',
+        baseUrl: 'http://localhost:11434',
+      },
+      newsAPI: {
+        provider: 'newsapi',
+        apiKey: process.env.NEWSAPI_API_KEY || '70803be67f5d4647b6e54a35f0615d25',
+        baseUrl: 'https://newsapi.org/v2',
       },
       publishPlatforms: {},
       createdAt: new Date().toISOString(),

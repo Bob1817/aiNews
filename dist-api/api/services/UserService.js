@@ -5,18 +5,6 @@ const crypto_1 = require("crypto");
 const UserRepository_1 = require("../repositories/UserRepository");
 class UserService {
     constructor() {
-        Object.defineProperty(this, "userRepository", {
-            enumerable: true,
-            configurable: true,
-            writable: true,
-            value: void 0
-        });
-        Object.defineProperty(this, "useDatabase", {
-            enumerable: true,
-            configurable: true,
-            writable: true,
-            value: void 0
-        });
         this.userRepository = new UserRepository_1.UserRepository();
         this.useDatabase = false; // 默认使用模拟数据，数据库连接成功后可以切换
         // 初始化一些模拟数据
@@ -173,15 +161,6 @@ class UserService {
     }
 }
 exports.UserService = UserService;
-Object.defineProperty(UserService, "users", {
-    enumerable: true,
-    configurable: true,
-    writable: true,
-    value: []
-});
-Object.defineProperty(UserService, "userProfiles", {
-    enumerable: true,
-    configurable: true,
-    writable: true,
-    value: []
-});
+UserService.users = [];
+UserService.userProfiles = [];
+//# sourceMappingURL=UserService.js.map

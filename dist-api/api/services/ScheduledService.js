@@ -8,12 +8,6 @@ const node_cron_1 = __importDefault(require("node-cron"));
 const NewsService_1 = require("./NewsService");
 class ScheduledService {
     constructor() {
-        Object.defineProperty(this, "newsService", {
-            enumerable: true,
-            configurable: true,
-            writable: true,
-            value: void 0
-        });
         this.newsService = new NewsService_1.NewsService();
         this.setupCronJobs();
     }
@@ -38,3 +32,4 @@ class ScheduledService {
     }
 }
 exports.ScheduledService = ScheduledService;
+//# sourceMappingURL=ScheduledService.js.map

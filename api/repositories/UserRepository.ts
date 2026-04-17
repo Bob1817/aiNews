@@ -1,5 +1,5 @@
 import { getSupabaseClient } from '../config/database'
-import { UserProfile } from '../../src/types'
+import { UserProfile } from '../../shared/types'
 
 export class UserRepository {
   private supabase = getSupabaseClient()

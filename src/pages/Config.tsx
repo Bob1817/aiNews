@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
-import { ArrowLeft, Save, TestTube, Globe, MessageSquare, Key, Server, Cpu } from 'lucide-react'
+import { ArrowLeft, Save, TestTube, Globe, MessageSquare, Key, Server, Cpu, RefreshCw } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useToast } from '@/lib/toast'
-import { getConfig, updateConfig } from '@/lib/api/config'
+import { getConfig, updateConfig, testAIModel, getOllamaModels } from '@/lib/api/config'
 import { getErrorMessage } from '@/lib/errors'
 import { testNewsApi } from '@/lib/api/news'
 import type { UserConfig } from '@/types'
@@ -79,7 +79,28 @@ export function Config() {
   const [isSaving, setIsSaving] = useState(false)
   const [testResults, setTestResults] = useState<{ [key: string]: string }>({})
   const [testDiagnostics, setTestDiagnostics] = useState<Record<string, NewsApiDiagnostic>>({})
+  const [ollamaModels, setOllamaModels] = useState<Array<{ name: string; model: string }>>([])
+  const [isFetchingModels, setIsFetchingModels] = useState(false)
   const { showToast } = useToast()
+
+  const fetchOllamaModels = async () => {
+    if (config.aiModel.provider === 'ollama' && config.aiModel.baseUrl) {
+      setIsFetchingModels(true)
+      try {
+        const data = await getOllamaModels(config.aiModel.baseUrl)
+        setOllamaModels(data.models)
+      } catch (error) {
+        console.error('获取Ollama模型列表失败:', error)
+        showToast({
+          title: '获取模型列表失败',
+          message: '无法连接到Ollama服务，请确保Ollama已启动。',
+          variant: 'error',
+        })
+      } finally {
+        setIsFetchingModels(false)
+      }
+    }
+  }
 
   useEffect(() => {
     // 从后端 API 获取配置
@@ -121,6 +142,15 @@ export function Config() {
 
     fetchConfig()
   }, [showToast])
+
+  useEffect(() => {
+    // 当provider为ollama且baseUrl变化时，获取模型列表
+    if (config.aiModel.provider === 'ollama' && config.aiModel.baseUrl) {
+      fetchOllamaModels()
+    } else {
+      setOllamaModels([])
+    }
+  }, [config.aiModel.provider, config.aiModel.baseUrl])
 
   const handleSave = async () => {
     setIsSaving(true)
@@ -170,6 +200,19 @@ export function Config() {
             [platform]: getNewsApiDiagnosis(data.message),
           }))
         }
+        showToast({
+          title: data.success ? '测试成功' : '测试失败',
+          message: data.message,
+          variant: data.success ? 'success' : 'error',
+        })
+      } else if (platform === 'aiModel') {
+        const data = await testAIModel({
+          aiModel: config.aiModel
+        })
+        setTestResults({ 
+          ...testResults, 
+          [platform]: data.success ? data.message : `测试失败: ${data.message}` 
+        })
         showToast({
           title: data.success ? '测试成功' : '测试失败',
           message: data.message,
@@ -249,15 +292,19 @@ export function Config() {
                 </label>
                 <select
                   value={config.aiModel.provider}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    const newProvider = e.target.value as 'openai' | 'anthropic' | 'google' | 'ollama'
                     setConfig({
                       ...config,
                       aiModel: {
                         ...config.aiModel,
-                        provider: e.target.value as 'openai' | 'anthropic' | 'google' | 'ollama',
+                        provider: newProvider,
+                        baseUrl: newProvider === 'ollama' 
+                          ? (config.aiModel.baseUrl || 'http://localhost:11434') 
+                          : config.aiModel.baseUrl,
                       },
                     })
-                  }
+                  }}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 >
                   <option value="openai">OpenAI</option>
@@ -299,21 +346,54 @@ export function Config() {
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   模型名称
                 </label>
-                <input
-                  type="text"
-                  value={config.aiModel.modelName}
-                  onChange={(e) =>
-                    setConfig({
-                      ...config,
-                      aiModel: {
-                        ...config.aiModel,
-                        modelName: e.target.value,
-                      },
-                    })
-                  }
-                  placeholder={config.aiModel.provider === 'ollama' ? '例如：llama2, mistral, codellama' : '请输入模型名称'}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
+                {config.aiModel.provider === 'ollama' ? (
+                  <div className="relative">
+                    <select
+                      value={config.aiModel.modelName}
+                      onChange={(e) =>
+                        setConfig({
+                          ...config,
+                          aiModel: {
+                            ...config.aiModel,
+                            modelName: e.target.value,
+                          },
+                        })
+                      }
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    >
+                      <option value="">请选择模型</option>
+                      {ollamaModels.map((model) => (
+                        <option key={model.model} value={model.model}>
+                          {model.name}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={fetchOllamaModels}
+                      disabled={isFetchingModels || !config.aiModel.baseUrl}
+                      className="absolute right-2 top-1/2 transform -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 disabled:opacity-50"
+                    >
+                      <RefreshCw className="w-4 h-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <input
+                    type="text"
+                    value={config.aiModel.modelName}
+                    onChange={(e) =>
+                      setConfig({
+                        ...config,
+                        aiModel: {
+                          ...config.aiModel,
+                          modelName: e.target.value,
+                        },
+                      })
+                    }
+                    placeholder="请输入模型名称"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                )}
               </div>
 
               <div>
@@ -348,12 +428,31 @@ export function Config() {
                         <br />
                         默认运行命令：<code className="bg-blue-100 px-1 rounded">ollama serve</code>
                         <br />
-                        下载模型：<code className="bg-blue-100 px-1 rounded">ollama pull llama2</code>
+                        下载模型：<code className="bg-blue-100 px-1 rounded">ollama pull gemma</code>
                       </p>
                     </div>
                   </div>
                 </div>
               )}
+
+              <div>
+                <button
+                  onClick={() => handleTest('aiModel')}
+                  className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+                >
+                  <TestTube className="w-4 h-4" />
+                  测试连接
+                </button>
+                {testResults.aiModel && (
+                  <p className={`mt-2 text-sm ${
+                    testResults.aiModel.includes('成功')
+                      ? 'text-green-600'
+                      : 'text-yellow-600'
+                  }`}>
+                    {testResults.aiModel}
+                  </p>
+                )}
+              </div>
             </div>
           </div>
 

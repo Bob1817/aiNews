@@ -13,3 +13,25 @@ export function updateConfig(payload: {
 }) {
   return apiRequest<UserConfig>('/api/config', withJsonBody(payload, { method: 'PUT' }))
 }
+
+export function testAIModel(payload: {
+  aiModel: UserConfig['aiModel']
+}) {
+  return apiRequest<{ success: boolean; message: string }>('/api/config/test-ai', withJsonBody(payload, { method: 'POST' }))
+}
+
+export async function getOllamaModels(baseUrl: string) {
+  const response = await fetch(`${baseUrl}/api/tags`)
+  const contentType = response.headers.get('content-type') || ''
+  const isJson = contentType.includes('application/json')
+  const data = isJson ? await response.json() : await response.text()
+
+  if (!response.ok) {
+    const message = typeof data === 'object' && data !== null && 'error' in data
+      ? String(data.error)
+      : `请求失败: ${response.status}`
+    throw new Error(message)
+  }
+
+  return data as { models: Array<{ name: string; model: string }> }
+}
