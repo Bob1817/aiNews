@@ -2,14 +2,22 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { Login } from '../pages/Login'
 import { Register } from '../pages/Register'
-import * as authService from '../lib/auth'
+import * as authApi from '../lib/api/auth'
+import * as authSession from '../lib/auth'
 
-// 模拟 auth 模块
-jest.mock('../lib/auth', () => ({
+jest.mock('../lib/api/auth', () => ({
   login: jest.fn(),
   register: jest.fn(),
-  isAuthenticated: jest.fn(),
-  subscribeToAuthChange: jest.fn(),
+}))
+
+jest.mock('../lib/auth', () => ({
+  setAuthSession: jest.fn(),
+}))
+
+jest.mock('../lib/toast', () => ({
+  useToast: () => ({
+    showToast: jest.fn(),
+  }),
 }))
 
 describe('认证功能测试', () => {
@@ -24,13 +32,17 @@ describe('认证功能测试', () => {
       expect(screen.getByRole('heading', { name: /登录/i })).toBeInTheDocument()
       expect(screen.getByPlaceholderText('请输入邮箱')).toBeInTheDocument()
       expect(screen.getByPlaceholderText('请输入密码')).toBeInTheDocument()
-      expect(screen.getByRole('button', { name: /登录/i })).toBeInTheDocument()
-      expect(screen.getByText(/注册账号/i)).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /登录账号/i })).toBeInTheDocument()
+      expect(screen.getByText(/^注册$/)).toBeInTheDocument()
     })
 
     test('应该处理表单提交', async () => {
-      const mockLogin = authService.login as jest.Mock
-      mockLogin.mockResolvedValue({ success: true })
+      const mockLogin = jest.mocked(authApi.login)
+      const mockSetAuthSession = jest.mocked(authSession.setAuthSession)
+      mockLogin.mockResolvedValue({
+        user: { id: '1', email: 'test@example.com', name: '测试用户' },
+        profile: { id: '1', userId: '1' },
+      } as any)
       
       render(
         <MemoryRouter>
@@ -47,17 +59,21 @@ describe('认证功能测试', () => {
       })
       
       // 提交表单
-      fireEvent.click(screen.getByRole('button', { name: /登录/i }))
+      fireEvent.click(screen.getByRole('button', { name: /登录账号/i }))
       
       // 验证登录函数被调用
       await waitFor(() => {
-        expect(mockLogin).toHaveBeenCalledWith('test@example.com', 'password123')
+        expect(mockLogin).toHaveBeenCalledWith({
+          email: 'test@example.com',
+          password: 'password123',
+        })
+        expect(mockSetAuthSession).toHaveBeenCalled()
       })
     })
 
     test('应该显示登录错误', async () => {
-      const mockLogin = authService.login as jest.Mock
-      mockLogin.mockRejectedValue({ message: '邮箱或密码错误' })
+      const mockLogin = jest.mocked(authApi.login)
+      mockLogin.mockRejectedValue(new Error('邮箱或密码错误'))
       
       render(
         <MemoryRouter>
@@ -74,7 +90,7 @@ describe('认证功能测试', () => {
       })
       
       // 提交表单
-      fireEvent.click(screen.getByRole('button', { name: /登录/i }))
+      fireEvent.click(screen.getByRole('button', { name: /登录账号/i }))
       
       // 验证错误消息显示
       await waitFor(() => {
@@ -92,16 +108,20 @@ describe('认证功能测试', () => {
       )
       
       expect(screen.getByRole('heading', { name: /注册/i })).toBeInTheDocument()
+      expect(screen.getByPlaceholderText('请输入您的姓名')).toBeInTheDocument()
       expect(screen.getByPlaceholderText('请输入邮箱')).toBeInTheDocument()
       expect(screen.getByPlaceholderText('请输入密码')).toBeInTheDocument()
       expect(screen.getByPlaceholderText('请再次输入密码')).toBeInTheDocument()
       expect(screen.getByRole('button', { name: /注册/i })).toBeInTheDocument()
-      expect(screen.getByText(/登录账号/i)).toBeInTheDocument()
+      expect(screen.getByText(/^登录$/)).toBeInTheDocument()
     })
 
     test('应该处理表单提交', async () => {
-      const mockRegister = authService.register as jest.Mock
-      mockRegister.mockResolvedValue({ success: true })
+      const mockRegister = jest.mocked(authApi.register)
+      mockRegister.mockResolvedValue({
+        user: { id: '1', email: 'newuser@example.com', name: '新用户' },
+        profile: { id: '1', userId: '1' },
+      } as any)
       
       render(
         <MemoryRouter>
@@ -110,6 +130,9 @@ describe('认证功能测试', () => {
       )
       
       // 填写表单
+      fireEvent.change(screen.getByPlaceholderText('请输入您的姓名'), {
+        target: { value: '新用户' },
+      })
       fireEvent.change(screen.getByPlaceholderText('请输入邮箱'), {
         target: { value: 'newuser@example.com' },
       })
@@ -125,7 +148,11 @@ describe('认证功能测试', () => {
       
       // 验证注册函数被调用
       await waitFor(() => {
-        expect(mockRegister).toHaveBeenCalledWith('newuser@example.com', 'password123')
+        expect(mockRegister).toHaveBeenCalledWith({
+          name: '新用户',
+          email: 'newuser@example.com',
+          password: 'password123',
+        })
       })
     })
 
@@ -137,6 +164,9 @@ describe('认证功能测试', () => {
       )
       
       // 填写表单
+      fireEvent.change(screen.getByPlaceholderText('请输入您的姓名'), {
+        target: { value: '新用户' },
+      })
       fireEvent.change(screen.getByPlaceholderText('请输入邮箱'), {
         target: { value: 'newuser@example.com' },
       })
@@ -152,13 +182,13 @@ describe('认证功能测试', () => {
       
       // 验证错误消息显示
       await waitFor(() => {
-        expect(screen.getByText('两次输入的密码不一致')).toBeInTheDocument()
+        expect(screen.getByText('两次密码输入不一致')).toBeInTheDocument()
       })
     })
 
     test('应该显示注册错误', async () => {
-      const mockRegister = authService.register as jest.Mock
-      mockRegister.mockRejectedValue({ message: '邮箱已被注册' })
+      const mockRegister = jest.mocked(authApi.register)
+      mockRegister.mockRejectedValue(new Error('邮箱已被注册'))
       
       render(
         <MemoryRouter>
@@ -167,6 +197,9 @@ describe('认证功能测试', () => {
       )
       
       // 填写表单
+      fireEvent.change(screen.getByPlaceholderText('请输入您的姓名'), {
+        target: { value: '已有用户' },
+      })
       fireEvent.change(screen.getByPlaceholderText('请输入邮箱'), {
         target: { value: 'existing@example.com' },
       })

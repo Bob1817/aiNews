@@ -194,15 +194,7 @@ export async function deleteNews(id: string) {
     return result
   } catch (error) {
     console.error('删除新闻失败:', error)
-    // 出错时返回模拟数据
-    const mockResult = {
-      success: true,
-      message: '删除成功'
-    }
-    console.log('出错时使用模拟数据:', mockResult)
-    // 更新内存存储
-    savedNewsMemory = savedNewsMemory.filter(news => news.id !== id)
-    return mockResult
+    throw error
   }
 }
 

@@ -33,13 +33,12 @@ const config: Config = {
   // 转换配置
   transform: {
     '^.+\\.(ts|tsx)$': ['ts-jest', {
-      tsconfig: 'tsconfig.json',
-      isolatedModules: true
+      tsconfig: 'tsconfig.json'
     }]
   },
 
   // 测试覆盖率配置
-  collectCoverage: true,
+  collectCoverage: false,
   collectCoverageFrom: [
     'src/**/*.{ts,tsx}',
     'api/**/*.{ts,tsx}',
@@ -86,14 +85,7 @@ const config: Config = {
   runner: 'jest-runner',
 
   // 测试位置
-  roots: ['<rootDir>/src', '<rootDir>/api', '<rootDir>/shared'],
-
-  // 全局变量
-  globals: {
-    'ts-jest': {
-      isolatedModules: true
-    }
-  }
+  roots: ['<rootDir>/src', '<rootDir>/api', '<rootDir>/shared']
 }
 
 export default config

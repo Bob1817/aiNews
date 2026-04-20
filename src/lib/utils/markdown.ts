@@ -8,6 +8,9 @@ export function stripMarkdown(text: string): string {
 
   let stripped = text
 
+  // 移除代码块，避免代码内容污染摘要
+  stripped = stripped.replace(/```[\s\S]*?```/g, '')
+
   // 移除标题标记 (#, ##, ### 等)
   stripped = stripped.replace(/^#+\s+/gm, '')
 
@@ -22,14 +25,14 @@ export function stripMarkdown(text: string): string {
   // 移除删除线标记 (~~text~~)
   stripped = stripped.replace(/~~(.*?)~~/g, '$1')
 
-  // 移除行内代码标记 (`text`)
-  stripped = stripped.replace(/`(.*?)`/g, '$1')
+  // 移除图片标记 (![alt](url)) - 需要匹配 ! 字符
+  stripped = stripped.replace(/!\[(.*?)\]\(.*?\)/g, '$1')
 
   // 移除链接标记 ([text](url))
   stripped = stripped.replace(/\[(.*?)\]\(.*?\)/g, '$1')
 
-  // 移除图片标记 (![alt](url)) - 需要匹配 ! 字符
-  stripped = stripped.replace(/!\[(.*?)\]\(.*?\)/g, '$1')
+  // 移除行内代码标记 (`text`)
+  stripped = stripped.replace(/`(.*?)`/g, '$1')
 
   // 移除引用标记 (> text)
   stripped = stripped.replace(/^>\s+/gm, '')
@@ -44,9 +47,6 @@ export function stripMarkdown(text: string): string {
     return match.replace(/^\||\|$/g, '').trim()
   })
   stripped = stripped.replace(/^[\s]*[-|:]+\s*$/gm, '')
-
-  // 移除代码块标记 (```language 和 ```) - 需要匹配整行
-  stripped = stripped.replace(/^```[\w\s]*$/gm, '')
 
   // 移除多余的换行和空格
   stripped = stripped.replace(/\n{3,}/g, '\n\n').trim()

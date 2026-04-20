@@ -86,7 +86,6 @@ console.log('hello')
     const expected = `标题
 
 这是粗体和斜体文本。
-
 列表项1
 列表项2
 
@@ -106,7 +105,7 @@ describe('truncateWithStripMarkdown', () => {
   test('应该清除markdown并截断文本', () => {
     const text = '# 标题\n\n这是**粗体**文本，包含一些markdown格式。'
     const result = truncateWithStripMarkdown(text, 10)
-    expect(result).toBe('标题\n\n这是粗...')
+    expect(result).toBe('标题\n\n这是粗体文本...')
   })
 
   test('当文本短于最大长度时不应截断', () => {

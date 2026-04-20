@@ -1,14 +1,72 @@
 import { Request, Response } from 'express'
 import { ConfigService } from '../services/ConfigService'
-import { AICrawlerService } from '../services/AICrawlerService'
 
 export class ConfigController {
   private configService: ConfigService
-  private aiCrawlerService: AICrawlerService
 
   constructor() {
     this.configService = new ConfigService()
-    this.aiCrawlerService = new AICrawlerService()
+  }
+
+  private hasConfiguredAIModel(aiModel: {
+    provider?: string
+    apiKey?: string
+    modelName?: string
+    baseUrl?: string
+  }): boolean {
+    switch (aiModel.provider) {
+      case 'ollama':
+      case 'llamacpp':
+        return Boolean(aiModel.modelName || aiModel.baseUrl)
+      case 'openai':
+      case 'anthropic':
+      case 'google':
+        return Boolean(aiModel.apiKey || aiModel.modelName || aiModel.baseUrl)
+      default:
+        return false
+    }
+  }
+
+  private async testOllamaConnection(aiModel: {
+    baseUrl?: string
+    modelName?: string
+  }): Promise<{ success: boolean; message: string }> {
+    const baseUrl = (aiModel.baseUrl || 'http://localhost:11434').replace(/\/$/, '')
+    const modelName = aiModel.modelName || 'gemma'
+
+    try {
+      const response = await fetch(`${baseUrl}/api/tags`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      })
+
+      if (!response.ok) {
+        throw new Error(`Ollama API 调用失败: ${response.status}`)
+      }
+
+      const data = await response.json() as { models?: Array<{ name: string }> }
+      const hasModel = data.models?.some(model => model.name.includes(modelName))
+
+      if (!hasModel) {
+        return {
+          success: false,
+          message: `未找到 ${modelName} 模型，请确保已在 Ollama 中安装该模型`,
+        }
+      }
+
+      return {
+        success: true,
+        message: 'Ollama 模型连接成功',
+      }
+    } catch (error) {
+      console.error('Ollama 连接测试错误:', error)
+      return {
+        success: false,
+        message: 'Ollama 服务不可用，请确保 Ollama 正在运行并安装了相应模型',
+      }
+    }
   }
 
   private async testLlamaCppConnection(aiModel: {
@@ -98,15 +156,14 @@ export class ConfigController {
     try {
       const { userId, aiModel, newsAPI, publishPlatforms, aiModels } = req.body
 
-      // 测试 AI 模型连通性（如果提供了 AI 模型配置）
-      if (aiModel) {
+      // 仅在用户实际配置了 AI 模型时才校验，避免保存其他设置被空白模型配置阻塞
+      if (aiModel && this.hasConfiguredAIModel(aiModel)) {
         if (aiModel.provider === 'ollama') {
-          // 测试 Ollama 模型连通性
-          const crawlerTest = await this.aiCrawlerService.testCrawler()
-          if (!crawlerTest.success) {
+          const ollamaTest = await this.testOllamaConnection(aiModel)
+          if (!ollamaTest.success) {
             return res.status(400).json({ 
               error: 'AI 模型测试失败',
-              message: crawlerTest.message 
+              message: ollamaTest.message 
             })
           }
         } else if (aiModel.provider === 'llamacpp') {
@@ -220,44 +277,7 @@ export class ConfigController {
 
       let testResult
       if (aiModel.provider === 'ollama') {
-        // 测试 Ollama 模型连通性
-        const baseUrl = aiModel.baseUrl || 'http://localhost:11434'
-        const modelName = aiModel.modelName || 'gemma'
-        
-        try {
-          const response = await fetch(`${baseUrl}/api/tags`, {
-            method: 'GET',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-          })
-
-          if (!response.ok) {
-            throw new Error(`Ollama API 调用失败: ${response.status}`)
-          }
-
-          const data = await response.json() as { models?: Array<{ name: string }> }
-          
-          // 检查模型是否存在
-          const hasModel = data.models?.some(model => model.name.includes(modelName))
-          if (!hasModel) {
-            return res.json({ 
-              success: false,
-              message: `未找到 ${modelName} 模型，请确保已在 Ollama 中安装该模型` 
-            })
-          }
-
-          testResult = { 
-            success: true, 
-            message: 'Ollama 模型连接成功' 
-          }
-        } catch (error) {
-          console.error('Ollama 连接测试错误:', error)
-          testResult = { 
-            success: false, 
-            message: 'Ollama 服务不可用，请确保 Ollama 正在运行并安装了相应模型' 
-          }
-        }
+        testResult = await this.testOllamaConnection(aiModel)
       } else if (aiModel.provider === 'llamacpp') {
         testResult = await this.testLlamaCppConnection(aiModel)
       } else if (aiModel.provider === 'openai' || aiModel.provider === 'anthropic' || aiModel.provider === 'google') {
