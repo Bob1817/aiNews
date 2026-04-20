@@ -69,12 +69,12 @@ export function Chat() {
   }, [location.pathname])
 
   // 获取新闻
-  const fetchNews = async (showLoading = true) => {
+  const fetchNews = async (showLoading = true, forceRefresh = false) => {
     try {
       if (showLoading) {
         setIsLoading(true)
       }
-      const news = await getRecentNews('1')
+      const news = await getRecentNews('1', forceRefresh)
 
       // 检查返回的数据是否是数组
       if (Array.isArray(news)) {
@@ -175,7 +175,12 @@ export function Chat() {
   // 刷新新闻
   const handleRefreshNews = async () => {
     setIsRefreshing(true)
-    await fetchNews(false)
+    await fetchNews(false, true) // 传递 forceRefresh 参数
+  }
+
+  // 转发内容到对话框
+  const handleForwardToInput = (content: string) => {
+    setInputMessage(content)
   }
 
   // 保存到草稿
@@ -412,6 +417,7 @@ export function Chat() {
                     : null
                 }
                 onSaveToDraft={message.role === 'assistant' ? handleSaveToDraft : undefined}
+                onForwardToInput={handleForwardToInput}
                 isSaving={isSavingToDraft}
               />
             ))}
@@ -429,8 +435,8 @@ export function Chat() {
                       <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
                       <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
                     </div>
-                    <p className="text-gray-500 mt-2">AI 正在分析新闻内容...</p>
-                    <p className="text-gray-400 text-sm mt-1">正在思考创作角度...</p>
+                    <p className="text-gray-500 mt-2">AI 正在处理您的请求...</p>
+                    <p className="text-gray-400 text-sm mt-1">正在生成回复...</p>
                   </div>
                 </div>
               </div>

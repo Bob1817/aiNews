@@ -15,6 +15,7 @@ export interface SavedNews {
   title: string
   content: string
   originalNewsId?: string
+  url?: string
   isPublished: boolean
   publishedTo: string[]
   categories?: string[]

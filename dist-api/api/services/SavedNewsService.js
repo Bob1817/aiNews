@@ -88,6 +88,12 @@ class SavedNewsService {
         news.updatedAt = new Date().toISOString();
         return news;
     }
+    // 删除新闻
+    async deleteNews(id) {
+        const initialLength = SavedNewsService.savedNews.length;
+        SavedNewsService.savedNews = SavedNewsService.savedNews.filter((news) => news.id !== id);
+        return SavedNewsService.savedNews.length < initialLength;
+    }
 }
 exports.SavedNewsService = SavedNewsService;
 SavedNewsService.savedNews = [];

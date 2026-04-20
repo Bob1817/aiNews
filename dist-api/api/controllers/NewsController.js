@@ -15,7 +15,7 @@ class NewsController {
     // 获取最近新闻
     async getRecentNews(req, res) {
         try {
-            const { userId } = req.query;
+            const { userId, forceRefresh } = req.query;
             let userProfile;
             if (userId) {
                 try {
@@ -25,7 +25,7 @@ class NewsController {
                     console.log('获取用户资料失败，使用默认设置:', error);
                 }
             }
-            const news = await this.newsService.getRecentNews(userId, userProfile);
+            const news = await this.newsService.getRecentNews(userId, userProfile, forceRefresh === 'true');
             res.json(news);
         }
         catch (error) {
@@ -135,6 +135,36 @@ class NewsController {
             console.error('发布新闻错误:', error);
             res.status(500).json({
                 error: '发布新闻失败',
+                message: error instanceof Error ? error.message : '未知错误'
+            });
+        }
+    }
+    // 删除新闻
+    async deleteNews(req, res) {
+        try {
+            const { id } = req.params;
+            if (!id) {
+                return res.status(400).json({
+                    error: '参数验证失败',
+                    message: '新闻ID不能为空'
+                });
+            }
+            const success = await this.savedNewsService.deleteNews(id);
+            if (!success) {
+                return res.status(404).json({
+                    error: '新闻不存在',
+                    message: '找不到指定的新闻'
+                });
+            }
+            res.json({
+                success: true,
+                message: '新闻删除成功'
+            });
+        }
+        catch (error) {
+            console.error('删除新闻错误:', error);
+            res.status(500).json({
+                error: '删除新闻失败',
                 message: error instanceof Error ? error.message : '未知错误'
             });
         }

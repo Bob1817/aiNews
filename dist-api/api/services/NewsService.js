@@ -6,9 +6,7 @@ class NewsService {
     constructor() {
         this.aiCrawlerService = new AICrawlerService_1.AICrawlerService();
         // 初始化一些模拟数据
-        if (NewsService.newsArticles.length === 0) {
-            this.initializeMockData();
-        }
+        this.initializeMockData();
     }
     initializeMockData() {
         NewsService.newsArticles = [
@@ -45,20 +43,22 @@ class NewsService {
         ];
     }
     // 获取最近新闻
-    async getRecentNews(userId, userProfile) {
-        try {
-            // 使用 AI 爬虫服务获取新闻
-            const crawlResult = await this.aiCrawlerService.crawlNews(userProfile, userId);
-            if (crawlResult.success && crawlResult.articles.length > 0) {
-                NewsService.newsArticles = crawlResult.articles;
-            }
-        }
-        catch (error) {
-            console.error('爬虫获取新闻失败，使用模拟数据:', error);
-        }
-        // 如果没有新闻，确保返回初始化的模拟数据
-        if (NewsService.newsArticles.length === 0) {
+    async getRecentNews(userId, userProfile, forceRefresh = false) {
+        // 确保有默认新闻数据
+        if (NewsService.newsArticles.length === 0 || forceRefresh) {
             this.initializeMockData();
+        }
+        // 如果是刷新操作，尝试获取新新闻
+        if (forceRefresh) {
+            try {
+                const crawlResult = await this.aiCrawlerService.crawlNews(userProfile, userId);
+                if (crawlResult.success && crawlResult.articles.length > 0) {
+                    NewsService.newsArticles = crawlResult.articles;
+                }
+            }
+            catch (error) {
+                console.error('获取新新闻失败，使用默认数据:', error);
+            }
         }
         // 返回所有新闻，或者最多6条
         return NewsService.newsArticles.slice(0, 6);

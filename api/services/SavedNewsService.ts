@@ -108,4 +108,11 @@ export class SavedNewsService {
 
     return news
   }
+
+  // 删除新闻
+  async deleteNews(id: string): Promise<boolean> {
+    const initialLength = SavedNewsService.savedNews.length
+    SavedNewsService.savedNews = SavedNewsService.savedNews.filter((news) => news.id !== id)
+    return SavedNewsService.savedNews.length < initialLength
+  }
 }

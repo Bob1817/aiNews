@@ -19,6 +19,9 @@ router.put('/saved/:id', (req, res) => newsController.updateNews(req, res))
 // 发布新闻
 router.post('/publish/:id', (req, res) => newsController.publishNews(req, res))
 
+// 删除新闻
+router.delete('/saved/:id', (req, res) => newsController.deleteNews(req, res))
+
 // 手动触发新闻更新
 router.post('/update', (req, res) => newsController.updateNewsFeeds(req, res))
 
