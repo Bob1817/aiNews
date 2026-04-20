@@ -1,7 +1,7 @@
 {
   "name": "ai-news-tool",
   "version": "1.0.0",
-  "description": "AI 新闻创作工具桌面客户端",
+  "description": "AI 助手桌面工作台",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
@@ -81,7 +81,7 @@
   },
   "build": {
     "appId": "com.ainews.tool",
-    "productName": "AI 新闻创作工具",
+    "productName": "AI 助手",
     "directories": {
       "output": "release"
     },

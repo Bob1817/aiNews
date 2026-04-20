@@ -60,7 +60,7 @@ function createTray() {
     },
   ])
   
-  tray.setToolTip('AI 新闻创作工具')
+  tray.setToolTip('AI 助手')
   tray.setContextMenu(contextMenu)
   
   tray.on('double-click', () => {

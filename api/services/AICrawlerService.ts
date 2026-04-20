@@ -15,6 +15,12 @@ interface AIConfig {
   baseUrl?: string
 }
 
+interface NewsSourceConfig {
+  provider: 'newsapi' | 'guardian' | 'nytimes'
+  apiKey: string
+  baseUrl?: string
+}
+
 export class AICrawlerService {
   private crawledArticles: NewsArticle[] = []
   private configService: ConfigService
@@ -24,10 +30,14 @@ export class AICrawlerService {
   }
 
   // 基于用户兴趣爬取新闻
-  async crawlNews(userProfile?: UserProfile, userId?: string): Promise<CrawlResult> {
+  async crawlNews(
+    userProfile?: UserProfile,
+    userId?: string,
+    extraKeywords: string[] = []
+  ): Promise<CrawlResult> {
     try {
-      // 提取用户兴趣关键词
-      const keywords = this.extractKeywords(userProfile)
+      // 提取用户兴趣关键词，并合并本次对话输入的关键词
+      const keywords = this.extractKeywords(userProfile, extraKeywords)
       
       if (keywords.length === 0) {
         return {
@@ -39,8 +49,6 @@ export class AICrawlerService {
 
       console.log('开始爬取新闻，关键词:', keywords)
 
-      // 模拟爬虫行为 - 实际项目中这里会使用真实的网络爬虫库
-      // 例如 Puppeteer、Cheerio 或其他爬虫工具
       const articles = await this.simulateCrawling(keywords, userId)
 
       this.crawledArticles = articles
@@ -59,7 +67,7 @@ export class AICrawlerService {
   }
 
   // 提取用户兴趣关键词
-  private extractKeywords(userProfile?: UserProfile): string[] {
+  private extractKeywords(userProfile?: UserProfile, extraKeywords: string[] = []): string[] {
     const keywords = new Set<string>()
 
     // 添加用户设置的关键词
@@ -72,6 +80,12 @@ export class AICrawlerService {
       userProfile.industries.forEach(industry => keywords.add(industry))
     }
 
+    // 添加本次任务里额外指定的关键词
+    extraKeywords
+      .map((keyword) => keyword.trim())
+      .filter(Boolean)
+      .forEach((keyword) => keywords.add(keyword))
+
     // 默认关键词
     if (keywords.size === 0) {
       return ['人工智能', '科技', '财经', '健康']
@@ -80,17 +94,14 @@ export class AICrawlerService {
     return Array.from(keywords)
   }
 
-  // 使用 Ollama Gemma 模型获取推荐新闻
   private async simulateCrawling(keywords: string[], userId?: string): Promise<NewsArticle[]> {
-    try {
-      // 调用 Ollama API 获取推荐新闻
-      const articles = await this.callOllamaForNews(keywords, userId)
-      return articles
-    } catch (error) {
-      console.error('使用 Ollama 获取新闻失败，使用模拟数据:', error)
-      // 失败时使用模拟数据
-      return this.generateMockNews(keywords)
+    const realArticles = await this.fetchRealNews(keywords, userId)
+
+    if (realArticles.length > 0) {
+      return realArticles
     }
+
+    throw new Error('未从真实新闻源抓取到相关新闻，请检查新闻源配置或调整关键词')
   }
 
   // 获取 AI 配置
@@ -115,6 +126,109 @@ export class AICrawlerService {
       modelName: 'gemma',
       baseUrl: 'http://localhost:11434',
     }
+  }
+
+  private async getNewsSourceConfig(userId?: string): Promise<NewsSourceConfig | null> {
+    if (!userId) {
+      return null
+    }
+
+    try {
+      const config = await this.configService.getConfig(userId)
+      if (!config.newsAPI?.apiKey) {
+        return null
+      }
+
+      return {
+        provider: config.newsAPI.provider,
+        apiKey: config.newsAPI.apiKey,
+        baseUrl: config.newsAPI.baseUrl,
+      }
+    } catch (error) {
+      console.error('获取新闻源配置失败:', error)
+      return null
+    }
+  }
+
+  private async fetchRealNews(keywords: string[], userId?: string): Promise<NewsArticle[]> {
+    const config = await this.getNewsSourceConfig(userId)
+
+    if (!config) {
+      throw new Error('未配置可用的新闻源 API，请先在系统配置中完成新闻源设置')
+    }
+
+    if (config.provider === 'newsapi') {
+      return this.fetchNewsFromNewsApi(config, keywords)
+    }
+
+    throw new Error(`当前新闻源 ${config.provider} 暂未接入真实抓取`)
+  }
+
+  private async fetchNewsFromNewsApi(
+    config: NewsSourceConfig,
+    keywords: string[]
+  ): Promise<NewsArticle[]> {
+    const baseUrl = (config.baseUrl || 'https://newsapi.org/v2').replace(/\/$/, '')
+    const requestUrl = new URL(`${baseUrl}/everything`)
+    const query = keywords.slice(0, 6).join(' OR ')
+
+    requestUrl.searchParams.set('q', query)
+    requestUrl.searchParams.set('language', 'zh')
+    requestUrl.searchParams.set('sortBy', 'publishedAt')
+    requestUrl.searchParams.set('pageSize', '10')
+
+    const response = await fetch(requestUrl.toString(), {
+      method: 'GET',
+      headers: {
+        'X-Api-Key': config.apiKey,
+      },
+    })
+
+    const contentType = response.headers.get('content-type') || ''
+    const isJson = contentType.includes('application/json')
+    const data = isJson ? await response.json() : await response.text()
+
+    if (!response.ok) {
+      const message =
+        typeof data === 'object' && data !== null && 'message' in data
+          ? String(data.message)
+          : `新闻源请求失败: ${response.status}`
+      throw new Error(message)
+    }
+
+    const rawArticles =
+      typeof data === 'object' && data !== null && 'articles' in data
+        ? (data.articles as Array<{
+            title?: string
+            description?: string
+            content?: string
+            url?: string
+            publishedAt?: string
+            source?: { name?: string }
+          }>)
+        : []
+
+    return rawArticles
+      .filter((item) => item.title && item.url)
+      .map((item, index) => {
+        const summary = (item.description || item.content || '暂无摘要')
+          .replace(/\[\+\d+\schars\]$/, '')
+          .trim()
+        const matchedKeywords = keywords.filter((keyword) =>
+          `${item.title} ${summary}`.toLowerCase().includes(keyword.toLowerCase())
+        )
+
+        return {
+          id: `newsapi_${Date.now()}_${index}`,
+          title: item.title || '未命名新闻',
+          content: summary,
+          source: item.source?.name || 'NewsAPI',
+          url: item.url || '',
+          publishedAt: item.publishedAt || new Date().toISOString(),
+          relatedIndustries: [],
+          relatedKeywords: matchedKeywords.length > 0 ? matchedKeywords : keywords.slice(0, 4),
+        }
+      })
   }
 
   // 调用 Ollama API 获取推荐新闻
@@ -226,36 +340,6 @@ export class AICrawlerService {
     return articles
   }
 
-  // 生成模拟新闻数据
-  private generateMockNews(keywords: string[]): NewsArticle[] {
-    const mockArticles: NewsArticle[] = []
-    const sources = ['科技日报', '财经时报', '健康杂志', '汽车周刊', 'IT 时报']
-    const industries = ['科技', '财经', '健康', '汽车', '教育']
-
-    // 为每个关键词生成一些新闻
-    keywords.forEach((keyword, index) => {
-      for (let i = 0; i < 2; i++) {
-        const id = `${index}_${i}_${Date.now()}`
-        const source = sources[Math.floor(Math.random() * sources.length)]
-        const relatedIndustries = [industries[Math.floor(Math.random() * industries.length)]]
-        
-        mockArticles.push({
-          id,
-          title: `${keyword}领域${i + 1}月最新动态`,
-          content: `近日，${keyword}领域迎来重要发展。据报道，相关企业在${keyword}技术方面取得重大突破，预计将对行业产生深远影响。专家表示，这一发展将推动${keyword}领域的创新与应用。`,
-          source,
-          url: `https://example.com/news/${id}`,
-          publishedAt: new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000).toISOString(),
-          relatedIndustries,
-          relatedKeywords: [keyword, ...relatedIndustries]
-        })
-      }
-    })
-
-    // 随机打乱新闻顺序
-    return mockArticles.sort(() => Math.random() - 0.5)
-  }
-
   // 获取爬取的新闻
   getCrawledNews(): NewsArticle[] {
     return this.crawledArticles
@@ -270,62 +354,16 @@ export class AICrawlerService {
   // 测试爬虫连接（包括 Ollama 模型连通性）
   async testCrawler(): Promise<{ success: boolean; message: string }> {
     try {
-      // 测试 Ollama 模型连通性
-      const ollamaTest = await this.testOllamaConnection()
-      if (!ollamaTest.success) {
-        return ollamaTest
-      }
-
       // 测试爬虫功能
-      const result = await this.crawlNews()
+      const result = await this.crawlNews(undefined, '1', ['人工智能'])
       return {
         success: result.success,
-        message: result.success ? '爬虫连接成功' : result.error || '爬虫连接失败'
+        message: result.success ? '真实新闻抓取成功' : result.error || '爬虫连接失败'
       }
     } catch (error) {
       return {
         success: false,
         message: error instanceof Error ? error.message : '测试失败'
-      }
-    }
-  }
-
-  // 测试 Ollama 模型连通性
-  private async testOllamaConnection(): Promise<{ success: boolean; message: string }> {
-    const baseUrl = 'http://localhost:11434'
-    
-    try {
-      const response = await fetch(`${baseUrl}/api/tags`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      })
-
-      if (!response.ok) {
-        throw new Error(`Ollama API 调用失败: ${response.status}`)
-      }
-
-      const data = await response.json() as { models?: Array<{ name: string }> }
-      
-      // 检查模型是否存在
-      const hasGemmaModel = data.models?.some(model => model.name.includes('gemma'))
-      if (!hasGemmaModel) {
-        return {
-          success: false,
-          message: '未找到 gemma 模型，请确保已在 Ollama 中安装 gemma 模型'
-        }
-      }
-
-      return {
-        success: true,
-        message: 'Ollama gemma 模型连接成功'
-      }
-    } catch (error) {
-      console.error('Ollama 连接测试错误:', error)
-      return {
-        success: false,
-        message: 'Ollama 服务不可用，请确保 Ollama 正在运行并安装了 gemma 模型'
       }
     }
   }

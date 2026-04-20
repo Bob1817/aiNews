@@ -17,9 +17,53 @@ export class AIService {
     this.configService = new ConfigService()
   }
 
+  private isUsableConfig(config: Partial<AIConfig> | undefined): config is AIConfig {
+    if (!config?.provider) {
+      return false
+    }
+
+    if (config.provider === 'ollama' || config.provider === 'llamacpp') {
+      return Boolean(config.modelName || config.baseUrl)
+    }
+
+    return Boolean(config.apiKey && config.modelName)
+  }
+
+  private async resolveOllamaModelName(config: AIConfig): Promise<string> {
+    if (config.modelName?.trim()) {
+      return config.modelName.trim()
+    }
+
+    const baseUrl = (config.baseUrl || 'http://localhost:11434').replace(/\/$/, '')
+
+    try {
+      const response = await fetch(`${baseUrl}/api/tags`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      })
+
+      if (response.ok) {
+        const data = await response.json() as { models?: Array<{ name?: string; model?: string }> }
+        const firstModel = data.models?.[0]
+        const resolved = firstModel?.model || firstModel?.name
+
+        if (resolved) {
+          return resolved
+        }
+      }
+    } catch (error) {
+      console.warn('自动解析 Ollama 模型失败:', error)
+    }
+
+    return process.env.OLLAMA_MODEL || 'gemma4:latest'
+  }
+
   // 调用 Ollama API
   private async callOllamaAPI(config: AIConfig, prompt: string, systemPrompt?: string): Promise<string> {
-    const baseUrl = config.baseUrl || 'http://localhost:11434'
+    const baseUrl = (config.baseUrl || 'http://localhost:11434').replace(/\/$/, '')
+    const modelName = await this.resolveOllamaModelName(config)
     
     try {
       const response = await fetch(`${baseUrl}/api/generate`, {
@@ -28,14 +72,21 @@ export class AIService {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: config.modelName,
+          model: modelName,
           prompt: systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt,
           stream: false,
         }),
       })
 
       if (!response.ok) {
-        throw new Error(`Ollama API 调用失败: ${response.status}`)
+        const contentType = response.headers.get('content-type') || ''
+        const isJson = contentType.includes('application/json')
+        const data = isJson ? await response.json() : await response.text()
+        const message =
+          typeof data === 'object' && data !== null && 'error' in data
+            ? String(data.error)
+            : `Ollama API 调用失败: ${response.status}`
+        throw new Error(message)
       }
 
       const data = await response.json() as { response?: string }
@@ -145,20 +196,63 @@ export class AIService {
   private async getAIConfig(userId: string): Promise<AIConfig> {
     try {
       const config = await this.configService.getConfig(userId)
-      return {
+      const primaryConfig: AIConfig = {
         provider: config.aiModel.provider as any,
         apiKey: config.aiModel.apiKey,
         modelName: config.aiModel.modelName,
         baseUrl: config.aiModel.baseUrl,
       }
-    } catch (error) {
-      // 如果获取配置失败，使用默认配置
-      return {
-        provider: 'openai',
-        apiKey: '',
-        modelName: 'gpt-3.5-turbo',
-        baseUrl: '',
+
+      if (this.isUsableConfig(primaryConfig)) {
+        return primaryConfig
       }
+
+      const activeModel = config.aiModels?.find((item) => item.isActive) || config.aiModels?.[0]
+      const fallbackConfig: AIConfig | undefined = activeModel
+        ? {
+            provider: activeModel.provider,
+            apiKey: activeModel.apiKey,
+            modelName: activeModel.modelName,
+            baseUrl: activeModel.baseUrl,
+          }
+        : undefined
+
+      if (this.isUsableConfig(fallbackConfig)) {
+        return fallbackConfig
+      }
+
+      throw new Error('没有可用的 AI 模型配置')
+    } catch (error) {
+      throw error instanceof Error ? error : new Error('读取 AI 配置失败')
+    }
+  }
+
+  async generateText(userId: string, prompt: string, systemPrompt?: string): Promise<string> {
+    try {
+      const config = await this.getAIConfig(userId)
+      let response: string
+
+      console.log('AI 配置:', {
+        provider: config.provider,
+        hasApiKey: !!config.apiKey,
+        modelName: config.modelName,
+        baseUrl: config.baseUrl,
+      })
+
+      if (config.provider === 'ollama') {
+        response = await this.callOllamaAPI(config, prompt, systemPrompt)
+      } else if (config.provider === 'llamacpp') {
+        response = await this.callLlamaCppAPI(config, prompt, systemPrompt)
+      } else if (config.provider === 'openai' && config.apiKey && config.apiKey !== 'sk-...') {
+        response = await this.callOpenAIAPI(config, prompt, systemPrompt)
+      } else {
+        throw new Error('没有有效的 AI 模型配置')
+      }
+
+      return response
+    } catch (error) {
+      console.error('AI 文本生成失败:', error)
+      throw error
     }
   }
 
@@ -174,43 +268,25 @@ export class AIService {
     if (referencedNewsId) {
       const news = await this.newsService.getNewsById(referencedNewsId)
       if (news) {
-        fullPrompt = `请基于以下新闻内容进行创作：\n\n新闻标题：${news.title}\n\n新闻内容：${news.content}\n\n用户请求：${message}`
+        fullPrompt = `请基于以下新闻内容完成用户任务：\n\n新闻标题：${news.title}\n\n新闻内容：${news.content}\n\n用户请求：${message}`
       }
     }
 
-    // 不使用系统提示，直接传递用户的原话
+    const historySection =
+      history && history.length > 0
+        ? `最近对话记录：\n${history
+            .slice(-6)
+            .map((item) => `${item.role === 'user' ? '用户' : '助手'}：${item.content}`)
+            .join('\n')}\n\n`
+        : ''
 
-    try {
-      const config = await this.getAIConfig(userId)
-      let response: string
+    const content = await this.generateText(
+      userId,
+      `${historySection}${fullPrompt}`,
+      '你是 AI 助手的通用对话核心，擅长帮助用户处理日常工作任务。回答要直接、清晰、可执行。'
+    )
 
-      console.log('AI 配置:', { 
-        provider: config.provider, 
-        hasApiKey: !!config.apiKey, 
-        modelName: config.modelName,
-        baseUrl: config.baseUrl 
-      })
-
-      if (config.provider === 'ollama') {
-        console.log('使用 Ollama API')
-        response = await this.callOllamaAPI(config, fullPrompt)
-      } else if (config.provider === 'llamacpp') {
-        console.log('使用 llama.cpp API')
-        console.log('llama.cpp 配置:', { baseUrl: config.baseUrl || 'http://localhost:8080' })
-        response = await this.callLlamaCppAPI(config, fullPrompt)
-      } else if (config.provider === 'openai' && config.apiKey && config.apiKey !== 'sk-...') {
-        console.log('使用 OpenAI API')
-        response = await this.callOpenAIAPI(config, fullPrompt)
-      } else {
-        console.log('没有有效配置')
-        throw new Error('没有有效的 AI 模型配置')
-      }
-
-      return { content: response }
-    } catch (error) {
-      console.error('AI 对话调用失败:', error)
-      throw error
-    }
+    return { content }
   }
 
   // AI 新闻创作
@@ -237,24 +313,7 @@ export class AIService {
     // 不使用系统提示，直接传递用户的原话
 
     try {
-      const config = await this.getAIConfig(userId)
-      let response: string
-
-      console.log('AI 创作配置:', { provider: config.provider, hasApiKey: !!config.apiKey, modelName: config.modelName })
-
-      if (config.provider === 'ollama') {
-        console.log('使用 Ollama API 进行创作')
-        response = await this.callOllamaAPI(config, fullPrompt)
-      } else if (config.provider === 'llamacpp') {
-        console.log('使用 llama.cpp API 进行创作')
-        response = await this.callLlamaCppAPI(config, fullPrompt)
-      } else if (config.provider === 'openai' && config.apiKey && config.apiKey !== 'sk-...') {
-        console.log('使用 OpenAI API 进行创作')
-        response = await this.callOpenAIAPI(config, fullPrompt)
-      } else {
-        console.log('没有有效配置')
-        throw new Error('没有有效的 AI 模型配置')
-      }
+      const response = await this.generateText(userId, fullPrompt)
 
       // 尝试从响应中提取标题
       const titleMatch = response.match(/^#\s+(.+)$/m)

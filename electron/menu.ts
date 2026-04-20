@@ -6,10 +6,10 @@ export function createMenu() {
       label: '文件',
       submenu: [
         {
-          label: '新建新闻',
+          label: '新建工作流',
           accelerator: 'CmdOrCtrl+N',
           click: () => {
-            console.log('新建新闻')
+            console.log('新建工作流')
           },
         },
         { type: 'separator' },

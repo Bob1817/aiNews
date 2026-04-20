@@ -6,6 +6,7 @@ const configController = new ConfigController()
 
 // 获取配置
 router.get('/', (req, res) => configController.getConfig(req, res))
+router.get('/active-model', (req, res) => configController.getActiveAIModel(req, res))
 
 // 保存配置
 router.post('/', (req, res) => configController.saveConfig(req, res))

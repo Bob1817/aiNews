@@ -1,443 +1,189 @@
-# AI 新闻创作工具 - 技术架构文档
+# AI 助手 - 技术架构文档
 
-## 1. Architecture Design
+## 1. 架构目标
+系统从“单一新闻创作工具”升级为“聊天驱动的工作流平台”。整体架构需要满足三件事：
+- 聊天是统一入口。
+- 工作流定义可注册、可管理、可执行。
+- 既有新闻能力通过内置工作流适配，而不是被直接废弃。
 
+## 2. 总体架构
 ```mermaid
-graph TB
-    subgraph Desktop["桌面应用层"]
-        Electron["Electron"]
-        MainProcess["主进程"]
-        RendererProcess["渲染进程"]
-        Tray["系统托盘"]
-        Notification["系统通知"]
-    end
+flowchart LR
+    UI["Electron + React 聊天工作台"] --> Chat["统一聊天入口 /api/ai/chat"]
+    UI --> WorkflowUI["工作流库 / 管理页面"]
+    WorkflowUI --> WorkflowAPI["/api/workflows"]
 
-    subgraph Frontend["渲染进程层"]
-        React["React + TypeScript"]
-        Tailwind["Tailwind CSS"]
-        Zustand["Zustand 状态管理"]
-        Router["React Router"]
-    end
+    Chat --> Parser["WorkflowCommandService"]
+    Parser -->|命中工作流| Executor["WorkflowExecutionService"]
+    Parser -->|普通对话| Model["AIService"]
 
-    subgraph Backend["后端层"]
-        Express["Express.js"]
-        Auth["身份认证"]
-        NewsService["新闻服务"]
-        AIService["AI 服务"]
-        PublishService["发布服务"]
-    end
+    Executor --> Registry["WorkflowService"]
+    Executor --> Model
+    Executor --> NewsAdapter["新闻助手适配层"]
+    NewsAdapter --> NewsService["NewsService / SavedNewsService / PublishService"]
 
-    subgraph Data["数据层"]
-        Supabase["Supabase (PostgreSQL)"]
-        Storage["文件存储"]
-    end
-
-    subgraph External["外部服务"]
-        NewsAPI["新闻数据源 API"]
-        LLM["大语言模型 API"]
-        WeChat["微信公众号 API"]
-        Website["官网发布接口"]
-    end
-
-    Electron --> MainProcess
-    Electron --> RendererProcess
-    MainProcess --> Tray
-    MainProcess --> Notification
-    RendererProcess --> React
-    React --> Router
-    React --> Zustand
-    React --> Tailwind
-    React --> Express
-    Express --> Auth
-    Express --> NewsService
-    Express --> AIService
-    Express --> PublishService
-    Auth --> Supabase
-    NewsService --> Supabase
-    NewsService --> NewsAPI
-    AIService --> LLM
-    PublishService --> WeChat
-    PublishService --> Website
-    Supabase --> Storage
+    Registry --> Memory["内存存储（首版）"]
+    NewsService --> Memory
+    Config["ConfigService"] --> Model
 ```
 
-## 2. Technology Description
+## 3. 前端架构
+### 3.1 页面层
+- `Chat`：主工作台，承载普通对话、工作流命令、工作流执行结果与最近执行记录。
+- `Workflows`：工作流管理页，支持查看内置工作流、创建/编辑/删除自定义工作流。
+- `NewsList` / `NewsEdit`：保留为任务结果相关页面，承载新闻类结果的后续管理。
+- `Settings` / `Config`：保留为能力依赖配置页。
 
-- **Desktop Framework**: Electron + electron-builder
-- **Frontend**: React@18 + TypeScript + Tailwind CSS@3 + Vite
-- **Initialization Tool**: vite-init
-- **Backend**: Express.js@4 + TypeScript
-- **Database**: Supabase (PostgreSQL)
-- **State Management**: Zustand
-- **Routing**: React Router DOM
-- **Icons**: Lucide React
-- **Scheduled Tasks**: node-cron
-- **Packaging**: electron-builder
+### 3.2 状态层
+Zustand store 以以下状态为核心：
+- `conversationMessages`
+- `workflows`
+- `workflowExecutions`
+- `selectedWorkflow`
+- `newsArticles`
+- `savedNews`
+- `selectedNews`
 
-## 3. Route Definitions
+`ConversationMessage` 扩展支持：
+- `workflowId`
+- `workflowInvocation`
+- `messageType`
+- `executionId`
+- `artifacts`
 
-| Route | Purpose |
-|-------|---------|
-| /login | 登录页面 |
-| /register | 注册页面 |
-| /chat | 对话交互页面（首页） |
-| /settings | 用户设置页面 |
-| /news | 新闻管理页面 |
-| /news/edit/:id | 新闻编辑页面 |
-| /config | 系统配置页面 |
+### 3.3 交互机制
+- 输入框监听 `/` 与 `/+`，展示工作流候选。
+- 选中工作流后，允许“预选工作流 + 自然语言输入”的发送方式。
+- 若消息本身是 slash command，前端优先调用命令解析，未命中时给出错误提示。
 
-## 4. API Definitions
+## 4. 后端架构
+### 4.1 职责划分
+- `AIService`
+  - 负责底层模型调用。
+  - 根据用户配置选择 OpenAI、Ollama、llama.cpp 等提供方。
+- `WorkflowService`
+  - 负责工作流定义的 CRUD。
+  - 负责注册内置工作流。
+  - 首版采用内存存储。
+- `WorkflowCommandService`
+  - 负责解析 `/<名称>` 与 `/+<名称>`。
+  - 根据工作流注册表匹配命令。
+- `WorkflowExecutionService`
+  - 负责加载工作流定义。
+  - 组装系统提示与执行上下文。
+  - 严格按工作流步骤与约束驱动 AI 执行。
+  - 记录执行历史。
+- `AIController`
+  - 保留 `/api/ai/chat` 作为统一聊天入口。
+  - 先走命令解析；命中工作流则转入工作流执行服务。
 
-### 4.1 User APIs
+### 4.2 内置工作流适配
+首版提供一个内置工作流：
+- `新闻助手`
 
-```typescript
-// 用户信息
-interface UserProfile {
-  id: string;
-  email: string;
-  industries: string[];
-  keywords: string[];
-  isOnboardingComplete: boolean;
-  createdAt: string;
-  updatedAt: string;
-}
+该工作流通过 `WorkflowExecutionService` 注入新闻上下文，并复用：
+- `NewsService`
+- `SavedNewsService`
+- `PublishService`
 
-// 获取/更新用户信息
-GET /api/user/profile
-PUT /api/user/profile
-```
+这样现有新闻能力在产品层退为“工作流能力”，在技术层仍可复用现有服务。
 
-### 4.2 News APIs
+## 5. API 设计
+### 5.1 聊天接口
+`POST /api/ai/chat`
 
-```typescript
-// 新闻数据结构
-interface NewsArticle {
-  id: string;
-  title: string;
-  content: string;
-  source: string;
-  url: string;
-  publishedAt: string;
-  createdAt: string;
-}
-
-interface SavedNews {
-  id: string;
-  userId: string;
-  title: string;
-  content: string;
-  originalNewsId?: string;
-  isPublished: boolean;
-  publishedTo: string[];
-  createdAt: string;
-  updatedAt: string;
-}
-
-// 获取推送的新闻
-GET /api/news/recent?userId={userId}
-
-// 获取保存的新闻
-GET /api/news/saved?userId={userId}
-
-// 保存新闻
-POST /api/news/saved
+请求体：
+```json
 {
-  userId: string;
-  title: string;
-  content: string;
-  originalNewsId?: string;
-}
-
-// 更新新闻
-PUT /api/news/saved/:id
-
-// 发布新闻
-POST /api/news/publish/:id
-{
-  platforms: string[]; // ['website', 'wechat']
-}
-
-// 手动触发新闻更新
-POST /api/news/update
-```
-
-### 4.3 AI APIs
-
-```typescript
-// AI 对话请求
-POST /api/ai/chat
-{
-  userId: string;
-  message: string;
-  referencedNewsId?: string;
-  history: Array<{
-    role: 'user' | 'assistant';
-    content: string;
-  }>;
-}
-
-// AI 新闻创作请求
-POST /api/ai/compose
-{
-  userId: string;
-  prompt: string;
-  referencedNewsIds?: string[];
+  "userId": "1",
+  "message": "/新闻助手 帮我写一篇简讯",
+  "referencedNewsId": "news-1",
+  "history": [
+    { "role": "user", "content": "..." },
+    { "role": "assistant", "content": "..." }
+  ]
 }
 ```
 
-### 4.4 Config APIs
+返回体支持：
+- `content`
+- `workflow`
+- `execution`
+- `artifacts`
 
-```typescript
-// 配置数据结构
-interface Config {
-  aiModel: {
-    provider: string;
-    apiKey: string;
-    modelName: string;
-    baseUrl?: string;
-  };
-  publishPlatforms: {
-    website?: {
-      apiUrl: string;
-      apiKey: string;
-    };
-    wechat?: {
-      appId: string;
-      appSecret: string;
-      token: string;
-    };
-  };
-}
+### 5.2 工作流接口
+- `GET /api/workflows`
+- `POST /api/workflows`
+- `GET /api/workflows/:id`
+- `PUT /api/workflows/:id`
+- `DELETE /api/workflows/:id`
+- `GET /api/workflows/executions?userId=1`
+- `POST /api/workflows/parse-command`
+- `POST /api/workflows/:id/execute`
 
-// 获取配置
-GET /api/config?userId={userId}
+## 6. 数据模型
+### 6.1 WorkflowDefinition
+- `id`
+- `name`
+- `displayName`
+- `description`
+- `invocation`
+- `systemInstruction`
+- `steps`
+- `inputSchema`
+- `outputSchema`
+- `constraints`
+- `tools`
+- `capabilities`
+- `examples`
+- `extensionNotes`
+- `isBuiltIn`
+- `status`
+- `createdAt`
+- `updatedAt`
 
-// 保存配置
-PUT /api/config
-{
-  userId: string;
-  config: Config;
-}
-```
+### 6.2 WorkflowExecution
+- `id`
+- `workflowId`
+- `workflowName`
+- `invocation`
+- `userId`
+- `input`
+- `output`
+- `status`
+- `artifacts`
+- `createdAt`
+- `completedAt`
+- `error`
 
-## 5. Server Architecture Diagram
+## 7. 执行流程
+### 7.1 普通对话
+1. 前端调用 `/api/ai/chat`
+2. 后端解析消息，不命中工作流
+3. `AIService` 以通用助手系统提示生成回复
+4. 返回内容到聊天页
 
-```mermaid
-graph LR
-    Controller["Controllers<br/>请求处理层"]
-    Service["Services<br/>业务逻辑层"]
-    Repository["Repositories<br/>数据访问层"]
-    DB[(Supabase<br/>数据库)]
+### 7.2 工作流对话
+1. 前端发送 slash command 或预选工作流上下文
+2. 后端命中 `WorkflowCommandService`
+3. `WorkflowExecutionService` 读取工作流定义
+4. 组装严格执行系统提示、步骤与约束
+5. 如为新闻助手，则追加新闻上下文
+6. `AIService` 调用模型生成内容
+7. 记录 `WorkflowExecution`
+8. 返回结果、工作流信息与执行信息
 
-    Controller --> Service
-    Service --> Repository
-    Repository --> DB
-    
-    subgraph Controllers
-        AuthController
-        UserController
-        NewsController
-        AIController
-        ConfigController
-    end
-    
-    subgraph Services
-        AuthService
-        UserService
-        NewsService
-        AIService
-        PublishService
-        ScheduledService
-    end
-    
-    subgraph Repositories
-        UserRepository
-        NewsRepository
-        SavedNewsRepository
-        ConfigRepository
-    end
-```
+## 8. 存储策略
+- 首版继续使用当前内存态服务，优先完成工作流平台闭环。
+- 工作流定义和执行记录先保存在服务静态内存中。
+- 下一阶段如需持久化，可迁移到数据库或本地文件，不改变 API 形态。
 
-## 6. Data Model
-
-### 6.1 Data Model Definition
-
-```mermaid
-erDiagram
-    User ||--o{ UserProfile : has
-    User ||--o{ SavedNews : creates
-    User ||--o{ UserConfig : has
-    NewsArticle ||--o{ SavedNews : referenced_by
-
-    User {
-        string id PK
-        string email
-        string password_hash
-        timestamp created_at
-        timestamp updated_at
-    }
-
-    UserProfile {
-        string id PK
-        string user_id FK
-        string[] industries
-        string[] keywords
-        boolean is_onboarding_complete
-        timestamp created_at
-        timestamp updated_at
-    }
-
-    NewsArticle {
-        string id PK
-        string title
-        string content
-        string source
-        string url
-        timestamp published_at
-        timestamp retrieved_at
-        string[] related_industries
-        string[] related_keywords
-    }
-
-    SavedNews {
-        string id PK
-        string user_id FK
-        string title
-        string content
-        string original_news_id FK
-        boolean is_published
-        string[] published_to
-        timestamp created_at
-        timestamp updated_at
-    }
-
-    UserConfig {
-        string id PK
-        string user_id FK
-        json ai_model
-        json publish_platforms
-        timestamp created_at
-        timestamp updated_at
-    }
-```
-
-### 6.2 Data Definition Language
-
-```sql
--- 用户表（由 Supabase Auth 管理）
--- 创建用户资料表
-CREATE TABLE user_profiles (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
-    industries TEXT[] DEFAULT '{}',
-    keywords TEXT[] DEFAULT '{}',
-    is_onboarding_complete BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- 新闻文章表
-CREATE TABLE news_articles (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    title TEXT NOT NULL,
-    content TEXT,
-    source TEXT,
-    url TEXT,
-    published_at TIMESTAMPTZ,
-    retrieved_at TIMESTAMPTZ DEFAULT NOW(),
-    related_industries TEXT[] DEFAULT '{}',
-    related_keywords TEXT[] DEFAULT '{}'
-);
-
--- 保存的新闻表
-CREATE TABLE saved_news (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
-    title TEXT NOT NULL,
-    content TEXT,
-    original_news_id UUID REFERENCES news_articles(id),
-    is_published BOOLEAN DEFAULT FALSE,
-    published_to TEXT[] DEFAULT '{}',
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- 用户配置表
-CREATE TABLE user_configs (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
-    ai_model JSONB DEFAULT '{}',
-    publish_platforms JSONB DEFAULT '{}',
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- 创建索引
-CREATE INDEX idx_news_articles_retrieved_at ON news_articles(retrieved_at DESC);
-CREATE INDEX idx_news_articles_industries ON news_articles USING GIN(related_industries);
-CREATE INDEX idx_news_articles_keywords ON news_articles USING GIN(related_keywords);
-CREATE INDEX idx_saved_news_user_id ON saved_news(user_id);
-CREATE INDEX idx_user_profiles_user_id ON user_profiles(user_id);
-CREATE INDEX idx_user_configs_user_id ON user_configs(user_id);
-
--- 启用 RLS
-ALTER TABLE user_profiles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE news_articles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE saved_news ENABLE ROW LEVEL SECURITY;
-ALTER TABLE user_configs ENABLE ROW LEVEL SECURITY;
-
--- RLS 策略
--- user_profiles
-CREATE POLICY "Users can view their own profile" 
-    ON user_profiles FOR SELECT 
-    USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can update their own profile" 
-    ON user_profiles FOR UPDATE 
-    USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can insert their own profile" 
-    ON user_profiles FOR INSERT 
-    WITH CHECK (auth.uid() = user_id);
-
--- news_articles (公开可读)
-CREATE POLICY "News articles are viewable by everyone" 
-    ON news_articles FOR SELECT 
-    USING (true);
-
--- saved_news
-CREATE POLICY "Users can view their own saved news" 
-    ON saved_news FOR SELECT 
-    USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can insert their own saved news" 
-    ON saved_news FOR INSERT 
-    WITH CHECK (auth.uid() = user_id);
-
-CREATE POLICY "Users can update their own saved news" 
-    ON saved_news FOR UPDATE 
-    USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can delete their own saved news" 
-    ON saved_news FOR DELETE 
-    USING (auth.uid() = user_id);
-
--- user_configs
-CREATE POLICY "Users can view their own config" 
-    ON user_configs FOR SELECT 
-    USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can update their own config" 
-    ON user_configs FOR UPDATE 
-    USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can insert their own config" 
-    ON user_configs FOR INSERT 
-    WITH CHECK (auth.uid() = user_id);
-
--- 授予权限
-GRANT SELECT ON news_articles TO anon, authenticated;
-GRANT ALL ON user_profiles TO authenticated;
-GRANT ALL ON saved_news TO authenticated;
-GRANT ALL ON user_configs TO authenticated;
-```
+## 9. 测试策略
+- 类型检查：`npm run typecheck:frontend`、`npm run typecheck:api`
+- 回归测试：`npm test -- --runInBand`
+- 核心场景：
+  - 普通聊天
+  - slash command 调用工作流
+  - 内置工作流新闻助手执行
+  - 自定义工作流创建/编辑/删除
+  - 配置页与保存结果页不回归

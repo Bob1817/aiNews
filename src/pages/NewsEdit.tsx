@@ -1,18 +1,49 @@
-import { useState, useEffect } from 'react'
-import { useParams, useNavigate, Link } from 'react-router-dom'
-import { ArrowLeft, Save, Share2, CheckCircle2, Globe, MessageSquare } from 'lucide-react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Link, useNavigate, useParams } from 'react-router-dom'
+import {
+  ArrowLeft,
+  CheckCircle2,
+  Globe,
+  MessageSquare,
+  Save,
+  Share2,
+} from 'lucide-react'
 import { useToast } from '@/lib/toast'
 import { useAppStore } from '@/store'
-import type { SavedNews, NewsCategory } from '@/types'
+import type { NewsCategory, SavedNews } from '@/types'
 import { getErrorMessage } from '@/lib/errors'
 import { getCategories } from '@/lib/api/categories'
 import { createSavedNews, publishNews, updateSavedNews } from '@/lib/api/news'
 import { getDefaultCategories } from '@/lib/fallbacks'
 
+function Panel({
+  title,
+  description,
+  children,
+}: {
+  title: string
+  description: string
+  children: ReactNode
+}) {
+  return (
+    <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_22px_55px_rgba(15,23,42,0.05)]">
+      <div className="mb-5">
+        <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
+        <p className="mt-1 text-sm leading-7 text-slate-500">{description}</p>
+      </div>
+      {children}
+    </section>
+  )
+}
+
+const inputClassName =
+  'w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-sky-400 focus:bg-white focus:ring-4 focus:ring-sky-100'
+
 export function NewsEdit() {
   const { id } = useParams<{ id?: string }>()
   const navigate = useNavigate()
   const { savedNews, setSavedNews } = useAppStore()
+  const { showToast } = useToast()
 
   const [formData, setFormData] = useState({
     title: '',
@@ -25,16 +56,14 @@ export function NewsEdit() {
   const [categories, setCategories] = useState<NewsCategory[]>([])
   const [isLoadingCategories, setIsLoadingCategories] = useState(false)
   const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>([])
-  const { showToast } = useToast()
 
   useEffect(() => {
-    // 获取分类列表
     const fetchCategories = async () => {
       setIsLoadingCategories(true)
       try {
         const data = await getCategories()
         setCategories(data)
-      } catch (error) {
+      } catch {
         setCategories(getDefaultCategories())
         showToast({
           title: '分类加载失败',
@@ -49,7 +78,7 @@ export function NewsEdit() {
     fetchCategories()
 
     if (id) {
-      const news = savedNews.find((n) => n.id === id)
+      const news = savedNews.find((item) => item.id === id)
       if (news) {
         setFormData({
           title: news.title,
@@ -61,6 +90,17 @@ export function NewsEdit() {
     }
   }, [id, savedNews, showToast])
 
+  const currentNews = id ? savedNews.find((item) => item.id === id) : null
+  const contentLength = formData.content.trim().length
+  const estimatedReadMinutes = Math.max(1, Math.ceil(contentLength / 450))
+  const selectedCategoryNames = useMemo(
+    () =>
+      formData.categories
+        .map((categoryId) => categories.find((item) => item.id === categoryId)?.name)
+        .filter(Boolean) as string[],
+    [categories, formData.categories]
+  )
+
   const handleSave = async () => {
     if (!formData.title.trim() || !formData.content.trim()) return
 
@@ -69,22 +109,19 @@ export function NewsEdit() {
     try {
       if (id) {
         const data = await updateSavedNews(id, formData)
-
-        setSavedNews(
-          savedNews.map((news) => (news.id === id ? data.data : news))
-        )
+        setSavedNews(savedNews.map((news) => (news.id === id ? data.data : news)))
       } else {
         const data = await createSavedNews({
           userId: '1',
           ...formData,
           industries: [],
         })
-
         setSavedNews([data.data as SavedNews, ...savedNews])
       }
+
       showToast({
         title: '保存成功',
-        message: id ? '新闻内容已更新。' : '新闻已创建。',
+        message: id ? '内容已更新。' : '任务结果已创建。',
         variant: 'success',
       })
       navigate('/news')
@@ -138,146 +175,230 @@ export function NewsEdit() {
     }
   }
 
-  const currentNews = id ? savedNews.find((n) => n.id === id) : null
+  const toggleCategory = (categoryId: string, checked: boolean) => {
+    setFormData((current) => ({
+      ...current,
+      categories: checked
+        ? [...current.categories, categoryId]
+        : current.categories.filter((item) => item !== categoryId),
+    }))
+  }
 
   return (
-    <div className="flex flex-col h-full bg-gray-50">
-      <div className="bg-white border-b border-gray-200 px-6 py-4">
-        <div className="flex items-center gap-4">
-          <Link
-            to="/news"
-            className="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            返回
-          </Link>
-          <div className="flex-1">
-            <h1 className="text-xl font-semibold text-gray-900">
-              {id ? '编辑新闻' : '新建新闻'}
-            </h1>
-          </div>
-          <div className="flex items-center gap-3">
-            {id && currentNews && (
-              <div className="flex items-center gap-2">
-                {currentNews.isPublished && (
-                  <span className="flex items-center gap-1 text-xs font-medium text-green-600 bg-green-50 px-2 py-1 rounded">
-                    <CheckCircle2 className="w-3 h-3" />
-                    已发布
-                  </span>
-                )}
-              </div>
-            )}
-            {id && (
-              <button
-                onClick={() => setShowPublishOptions(true)}
-                disabled={isPublishing}
-                className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-cyan-500 text-white rounded-lg hover:opacity-90 disabled:opacity-50 transition-opacity"
+    <div className="h-full overflow-y-auto bg-[linear-gradient(180deg,#f8fafc_0%,#eef2ff_100%)]">
+      <div className="mx-auto flex min-h-full w-full max-w-[1600px] flex-col gap-6 px-6 py-6 lg:px-10">
+        <section className="rounded-[32px] border border-slate-200 bg-white/95 p-8 shadow-[0_30px_80px_rgba(15,23,42,0.08)]">
+          <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
+            <div className="max-w-3xl">
+              <Link
+                to="/news"
+                className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-200"
               >
-                <Share2 className="w-4 h-4" />
-                {isPublishing ? '发布中...' : '发布'}
-              </button>
-            )}
-            <button
-              onClick={handleSave}
-              disabled={isSaving}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
-            >
-              <Save className="w-4 h-4" />
-              {isSaving ? '保存中...' : '保存'}
-            </button>
-          </div>
-        </div>
-      </div>
+                <ArrowLeft className="h-4 w-4" />
+                返回任务结果
+              </Link>
+              <p className="mt-5 text-xs font-semibold uppercase tracking-[0.28em] text-sky-600">
+                Editor Workspace
+              </p>
+              <h1 className="mt-3 font-display text-3xl text-slate-900 md:text-4xl">
+                {id ? '编辑任务结果' : '新建任务结果'}
+              </h1>
+              <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600 md:text-base">
+                在这里整理工作流输出、补充最终表达并决定是否发布到外部渠道。页面布局围绕白天办公场景做了信息收束，方便持续编辑。
+              </p>
+            </div>
 
-      <div className="flex-1 overflow-y-auto p-6">
-        <div className="max-w-4xl mx-auto space-y-6">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              新闻标题
-            </label>
-            <input
-              type="text"
-              value={formData.title}
-              onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-              placeholder="请输入新闻标题..."
-              className="w-full px-4 py-3 border border-gray-300 rounded-xl text-lg font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              新闻分类
-            </label>
-            {isLoadingCategories ? (
-              <div className="text-center py-4">加载分类中...</div>
-            ) : (
-              <div className="flex flex-wrap gap-2">
-                {categories.map((category) => (
-                  <label
-                    key={category.id}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-lg cursor-pointer transition-colors ${
-                      formData.categories.includes(category.id)
-                        ? 'bg-blue-100 text-blue-700 border border-blue-300'
-                        : 'bg-gray-100 text-gray-700 border border-gray-300 hover:bg-gray-200'
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={formData.categories.includes(category.id)}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          setFormData({
-                            ...formData,
-                            categories: [...formData.categories, category.id],
-                          })
-                        } else {
-                          setFormData({
-                            ...formData,
-                            categories: formData.categories.filter((id) => id !== category.id),
-                          })
-                        }
-                      }}
-                      className="sr-only"
-                    />
-                    <span>{category.name}</span>
-                  </label>
-                ))}
+            <div className="grid gap-3 sm:grid-cols-3 xl:min-w-[520px]">
+              <div className="rounded-[26px] border border-slate-200 bg-white px-5 py-4 shadow-[0_20px_50px_rgba(15,23,42,0.05)]">
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">状态</p>
+                <p className="mt-3 text-2xl font-semibold text-slate-900">
+                  {currentNews?.isPublished ? '已发布' : '草稿'}
+                </p>
+                <p className="mt-1 text-sm text-slate-500">当前文稿所处阶段</p>
               </div>
-            )}
+              <div className="rounded-[26px] border border-slate-200 bg-white px-5 py-4 shadow-[0_20px_50px_rgba(15,23,42,0.05)]">
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">正文长度</p>
+                <p className="mt-3 text-2xl font-semibold text-slate-900">{contentLength}</p>
+                <p className="mt-1 text-sm text-slate-500">已输入字符数</p>
+              </div>
+              <div className="rounded-[26px] border border-slate-200 bg-white px-5 py-4 shadow-[0_20px_50px_rgba(15,23,42,0.05)]">
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">阅读时长</p>
+                <p className="mt-3 text-2xl font-semibold text-slate-900">{estimatedReadMinutes} 分钟</p>
+                <p className="mt-1 text-sm text-slate-500">按当前内容估算</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.4fr)_380px]">
+          <div className="space-y-6">
+            <Panel
+              title="内容编辑"
+              description="保留工作流输出的核心信息，再补齐最终可交付的标题与正文。"
+            >
+              <div className="space-y-5">
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-slate-700">标题</label>
+                  <input
+                    type="text"
+                    value={formData.title}
+                    onChange={(e) => setFormData((current) => ({ ...current, title: e.target.value }))}
+                    placeholder="例如：本周行业观察与推送摘要"
+                    className={`${inputClassName} text-base font-medium`}
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-slate-700">正文</label>
+                  <textarea
+                    value={formData.content}
+                    onChange={(e) => setFormData((current) => ({ ...current, content: e.target.value }))}
+                    placeholder="输入最终对外的内容稿，或者整理工作流结果。"
+                    rows={22}
+                    className={`${inputClassName} min-h-[520px] resize-y leading-7`}
+                  />
+                </div>
+              </div>
+            </Panel>
+
+            <Panel
+              title="分类归档"
+              description="将结果归入合适的分类，后续检索、统计和回看会更轻松。"
+            >
+              {isLoadingCategories ? (
+                <div className="rounded-2xl bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
+                  加载分类中...
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-3">
+                  {categories.map((category) => {
+                    const active = formData.categories.includes(category.id)
+                    return (
+                      <label
+                        key={category.id}
+                        className={`cursor-pointer rounded-2xl border px-4 py-3 text-sm font-medium transition ${
+                          active
+                            ? 'border-sky-300 bg-sky-50 text-sky-700 shadow-[0_12px_30px_rgba(14,165,233,0.12)]'
+                            : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300 hover:bg-white'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={active}
+                          onChange={(e) => toggleCategory(category.id, e.target.checked)}
+                          className="sr-only"
+                        />
+                        {category.name}
+                      </label>
+                    )
+                  })}
+                </div>
+              )}
+            </Panel>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              新闻内容
-            </label>
-            <textarea
-              value={formData.content}
-              onChange={(e) => setFormData({ ...formData, content: e.target.value })}
-              placeholder="请输入新闻内容..."
-              rows={20}
-              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
-            />
+          <div className="space-y-6">
+            <Panel
+              title="操作面板"
+              description="先保存草稿，确认无误后再发布到外部渠道。"
+            >
+              <div className="space-y-3">
+                {currentNews?.isPublished && (
+                  <div className="flex items-center gap-2 rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700">
+                    <CheckCircle2 className="h-4 w-4" />
+                    该内容已发布，可继续编辑后再次同步。
+                  </div>
+                )}
+
+                {id && (
+                  <button
+                    onClick={() => setShowPublishOptions(true)}
+                    disabled={isPublishing}
+                    className="flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-50"
+                  >
+                    <Share2 className="h-4 w-4" />
+                    {isPublishing ? '发布中...' : '发布到渠道'}
+                  </button>
+                )}
+
+                <button
+                  onClick={handleSave}
+                  disabled={isSaving}
+                  className="flex w-full items-center justify-center gap-2 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-medium text-sky-700 transition hover:bg-sky-100 disabled:opacity-50"
+                >
+                  <Save className="h-4 w-4" />
+                  {isSaving ? '保存中...' : '保存草稿'}
+                </button>
+              </div>
+            </Panel>
+
+            <Panel
+              title="当前摘要"
+              description="快速检查当前文稿的结构完整度，避免编辑过程中丢失关键信息。"
+            >
+              <div className="space-y-4 text-sm text-slate-600">
+                <div className="rounded-2xl bg-slate-50 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">标题预览</p>
+                  <p className="mt-2 text-base font-medium text-slate-900">
+                    {formData.title.trim() || '尚未填写标题'}
+                  </p>
+                </div>
+
+                <div className="rounded-2xl bg-slate-50 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">分类</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {selectedCategoryNames.length > 0 ? (
+                      selectedCategoryNames.map((name) => (
+                        <span
+                          key={name}
+                          className="rounded-full bg-violet-50 px-3 py-1 text-xs font-medium text-violet-700"
+                        >
+                          {name}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-sm text-slate-500">尚未选择分类</span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl bg-slate-50 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">编辑建议</p>
+                  <ul className="mt-3 space-y-2 leading-7 text-slate-600">
+                    <li>先明确标题和结论，再回头补充细节段落。</li>
+                    <li>用于发布的内容建议补齐分类，方便后续检索。</li>
+                    <li>若需要外发，优先在保存后进行渠道测试与发布。</li>
+                  </ul>
+                </div>
+              </div>
+            </Panel>
           </div>
         </div>
       </div>
 
       {showPublishOptions && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">选择发布平台</h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-lg rounded-[30px] border border-slate-200 bg-white p-7 shadow-[0_36px_100px_rgba(15,23,42,0.18)]">
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-sky-600">
+              Publish
+            </p>
+            <h3 className="mt-3 text-2xl font-semibold text-slate-900">选择发布渠道</h3>
+            <p className="mt-2 text-sm leading-7 text-slate-500">
+              可以先保存草稿，再选择将内容同步到官网新闻板块或微信公众号。
+            </p>
 
-            <div className="space-y-3 mb-6">
-              <label className="flex items-center gap-3 p-3 border border-gray-200 rounded-xl hover:bg-gray-50 cursor-pointer transition-colors">
-                <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-                  <Globe className="w-5 h-5 text-blue-600" />
+            <div className="mt-6 space-y-3">
+              <label className="flex cursor-pointer items-center gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 transition hover:border-slate-300 hover:bg-white">
+                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-sky-100">
+                  <Globe className="h-5 w-5 text-sky-700" />
                 </div>
                 <div className="flex-1">
-                  <p className="font-medium text-gray-900">官网新闻板块</p>
-                  <p className="text-sm text-gray-500">发布到公司官网</p>
+                  <p className="font-medium text-slate-900">官网新闻板块</p>
+                  <p className="text-sm text-slate-500">适合正式发布的公开内容</p>
                 </div>
                 <input
                   type="checkbox"
-                  className="w-5 h-5 text-blue-600 rounded"
+                  className="h-5 w-5 rounded border-slate-300 text-sky-600"
                   value="website"
                   checked={selectedPlatforms.includes('website')}
                   onChange={(e) => {
@@ -290,17 +411,17 @@ export function NewsEdit() {
                 />
               </label>
 
-              <label className="flex items-center gap-3 p-3 border border-gray-200 rounded-xl hover:bg-gray-50 cursor-pointer transition-colors">
-                <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
-                  <MessageSquare className="w-5 h-5 text-green-600" />
+              <label className="flex cursor-pointer items-center gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 transition hover:border-slate-300 hover:bg-white">
+                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-100">
+                  <MessageSquare className="h-5 w-5 text-emerald-700" />
                 </div>
                 <div className="flex-1">
-                  <p className="font-medium text-gray-900">微信公众号</p>
-                  <p className="text-sm text-gray-500">推送到微信公众号</p>
+                  <p className="font-medium text-slate-900">微信公众号</p>
+                  <p className="text-sm text-slate-500">适合推送给已有订阅用户</p>
                 </div>
                 <input
                   type="checkbox"
-                  className="w-5 h-5 text-green-600 rounded"
+                  className="h-5 w-5 rounded border-slate-300 text-emerald-600"
                   value="wechat"
                   checked={selectedPlatforms.includes('wechat')}
                   onChange={(e) => {
@@ -314,10 +435,10 @@ export function NewsEdit() {
               </label>
             </div>
 
-            <div className="flex gap-3">
+            <div className="mt-7 flex gap-3">
               <button
                 onClick={() => setShowPublishOptions(false)}
-                className="flex-1 px-4 py-2 text-gray-700 bg-gray-100 rounded-xl hover:bg-gray-200 transition-colors"
+                className="flex-1 rounded-2xl bg-slate-100 px-4 py-3 text-sm font-medium text-slate-700 transition hover:bg-slate-200"
               >
                 取消
               </button>
@@ -328,7 +449,7 @@ export function NewsEdit() {
                   }
                 }}
                 disabled={isPublishing}
-                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                className="flex-1 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-50"
               >
                 {isPublishing ? '发布中...' : '确认发布'}
               </button>

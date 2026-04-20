@@ -1,5 +1,8 @@
-import { User, Bot, Quote, Save, Copy, Repeat } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { User, Bot, Quote, Save, Copy, Repeat, MoreHorizontal } from 'lucide-react'
 import type { ConversationMessage, NewsArticle } from '@/types'
+import { useToast } from '@/lib/toast'
+import { MarkdownRenderer } from './MarkdownRenderer'
 
 interface ConversationItemProps {
   message: ConversationMessage
@@ -11,160 +14,191 @@ interface ConversationItemProps {
 
 export function ConversationItem({ message, referencedNews, onSaveToDraft, onForwardToInput, isSaving }: ConversationItemProps) {
   const isUser = message.role === 'user'
+  const { showToast } = useToast()
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!menuOpen) {
+      return
+    }
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) {
+        setMenuOpen(false)
+      }
+    }
+
+    window.addEventListener('mousedown', handlePointerDown)
+    return () => window.removeEventListener('mousedown', handlePointerDown)
+  }, [menuOpen])
 
   const handleCopy = async (content: string) => {
     try {
       await navigator.clipboard.writeText(content)
-      // 可以添加一个复制成功的提示
+      setMenuOpen(false)
+      showToast({
+        title: '复制成功',
+        variant: 'success',
+      })
     } catch (error) {
       console.error('复制失败:', error)
+      showToast({
+        title: '复制失败',
+        message: '请稍后重试',
+        variant: 'error',
+      })
     }
   }
 
-  // 去除 markdown 格式字符
   const removeMarkdown = (text: string) => {
     return text
-      // 去除标题标记
       .replace(/^#+/gm, '')
-      // 去除加粗标记
       .replace(/\*\*(.*?)\*\*/g, '$1')
-      // 去除斜体标记
       .replace(/\*(.*?)\*/g, '$1')
-      // 去除删除线
       .replace(/~~(.*?)~~/g, '$1')
-      // 去除代码块标记
       .replace(/```[\s\S]*?```/g, '')
-      // 去除行内代码
       .replace(/`(.*?)`/g, '$1')
-      // 去除链接标记
       .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-      // 去除引用标记
       .replace(/^>+/gm, '')
-      // 去除水平分隔线
       .replace(/^---+/gm, '')
-      // 去除多余的空白行
       .replace(/\n{3,}/g, '\n\n')
       .trim()
   }
 
+  const messageTime = new Date(message.timestamp).toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+
+  const actionButtonClassName = isUser
+    ? 'focus-ring group relative rounded-xl border border-slate-200 bg-white p-2 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-900'
+    : 'focus-ring group relative rounded-xl border border-slate-200 bg-slate-50 p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900'
+
+  const actionColumn = (
+    <div className="flex shrink-0 flex-col items-center gap-2 pt-1">
+      <div className="relative" ref={menuRef}>
+        <button
+          onClick={() => setMenuOpen((current) => !current)}
+          className={actionButtonClassName}
+          title="更多操作"
+          aria-label="更多操作"
+          aria-expanded={menuOpen}
+        >
+          <MoreHorizontal className="h-4 w-4" />
+        </button>
+        {menuOpen && (
+          <div className="absolute right-0 top-[calc(100%+8px)] z-20 min-w-[148px] rounded-2xl border border-slate-200 bg-white p-2 shadow-[0_18px_40px_rgba(15,23,42,0.12)]">
+            <button
+              onClick={() => handleCopy(message.content)}
+              className="focus-ring flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm text-slate-700 transition-colors hover:bg-slate-50"
+            >
+              <Copy className="h-4 w-4 text-slate-500" />
+              复制
+            </button>
+            {onForwardToInput && (
+              <button
+                onClick={() => {
+                  onForwardToInput(message.content)
+                  setMenuOpen(false)
+                }}
+                className="focus-ring flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm text-slate-700 transition-colors hover:bg-slate-50"
+              >
+                <Repeat className="h-4 w-4 text-slate-500" />
+                转发
+              </button>
+            )}
+            {!isUser && onSaveToDraft && (
+              <button
+                onClick={() => {
+                  onSaveToDraft(message.content)
+                  setMenuOpen(false)
+                }}
+                disabled={isSaving}
+                className="focus-ring flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm text-blue-700 transition-colors hover:bg-blue-50 disabled:opacity-50"
+              >
+                <Save className="h-4 w-4" />
+                {isSaving ? '保存中...' : '保存到草稿'}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+      <p className="pt-1 text-xs text-editorial-muted">{messageTime}</p>
+    </div>
+  )
+
   return (
     <div className="mb-6">
       {isUser ? (
-        // 用户消息 - 头像在右侧
-        <div className="flex flex-col items-end">
-          <div className="flex justify-end w-full mb-1">
-            <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center">
-              <User className="w-5 h-5 text-gray-500" />
+        <div className="flex w-full flex-col items-end">
+          <div className="mb-1 flex w-full justify-end">
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-slate-100">
+              <User className="h-5 w-5 text-slate-700" />
             </div>
           </div>
-          <div className="max-w-[80%] align-self-end">
-            {referencedNews && (
-              <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg flex items-start gap-2">
-                <Quote className="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" />
-                <div>
-                  <p className="text-xs text-blue-600 font-medium mb-1">引用新闻</p>
-                  <p className="text-sm text-blue-800">{referencedNews.title}</p>
+          <div className="flex w-full justify-end">
+            <div className="w-full max-w-[82%]">
+            {message.workflowInvocation && (
+              <div className="mb-3 flex justify-end">
+                <div className="inline-flex rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs text-blue-700">
+                {message.workflowInvocation}
                 </div>
               </div>
             )}
-            <div className="px-4 py-3 rounded-2xl bg-blue-600 text-white rounded-tr-md">
-              <p className="whitespace-pre-wrap">{removeMarkdown(message.content)}</p>
+            {referencedNews && (
+              <div className="mb-3 flex justify-end">
+                <div className="flex items-start gap-2 rounded-2xl border border-cyan-400/18 bg-cyan-400/10 p-3">
+                  <Quote className="mt-0.5 h-4 w-4 flex-shrink-0 text-cyan-300" />
+                  <div>
+                    <p className="mb-1 text-xs font-medium uppercase tracking-[0.18em] text-cyan-200">引用新闻</p>
+                    <p className="text-sm text-cyan-50">{referencedNews.title}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+            <div className="flex items-start justify-end gap-3">
+              {actionColumn}
+              <div className="rounded-[24px] rounded-tr-md border border-blue-200 bg-gradient-to-br from-editorial-violet via-editorial-indigo to-editorial-cyan px-5 py-4 text-white shadow-[0_14px_34px_rgba(37,99,235,0.18)]">
+                <p className="whitespace-pre-wrap text-[15px] leading-7">{removeMarkdown(message.content)}</p>
+              </div>
             </div>
-            <div className="flex mt-2 px-1 gap-1">
-              <button
-                onClick={() => handleCopy(message.content)}
-                className="p-2 text-blue-200 hover:text-white hover:bg-blue-700 rounded-lg transition-colors relative group"
-                title="复制"
-              >
-                <Copy className="w-4 h-4" />
-                <span className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-                  复制
-                </span>
-              </button>
-              {onForwardToInput && (
-                <button
-                  onClick={() => onForwardToInput(message.content)}
-                  className="p-2 text-blue-200 hover:text-white hover:bg-blue-700 rounded-lg transition-colors relative group"
-                  title="转发"
-                >
-                  <Repeat className="w-4 h-4" />
-                  <span className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-                    转发
-                  </span>
-                </button>
-              )}
-              <p className="text-xs text-gray-400 ml-auto">
-                {new Date(message.timestamp).toLocaleTimeString('zh-CN', {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })}
-              </p>
             </div>
           </div>
         </div>
       ) : (
-        // AI 消息 - 头像在左侧
-        <div className="flex flex-col items-start">
-          <div className="flex justify-start w-full mb-1">
-            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-600 to-cyan-500 flex items-center justify-center">
-              <Bot className="w-5 h-5 text-white" />
+        <div className="flex w-full flex-col items-start">
+          <div className="mb-1 flex w-full justify-start">
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-editorial-violet via-editorial-indigo to-editorial-cyan shadow-[0_14px_30px_rgba(37,99,235,0.18)]">
+              <Bot className="h-5 w-5 text-white" />
             </div>
           </div>
-          <div className="max-w-[80%] align-self-start">
+          <div className="flex w-full justify-start">
+            <div className="w-full max-w-[82%]">
+            {message.workflowInvocation && (
+              <div className="mb-3 inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs text-slate-700">
+                {message.workflowInvocation}
+              </div>
+            )}
             {referencedNews && (
-              <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg flex items-start gap-2">
-                <Quote className="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" />
+              <div className="mb-3 flex items-start gap-2 rounded-2xl border border-cyan-400/18 bg-cyan-400/10 p-3">
+                <Quote className="mt-0.5 h-4 w-4 flex-shrink-0 text-cyan-300" />
                 <div>
-                  <p className="text-xs text-blue-600 font-medium mb-1">引用新闻</p>
-                  <p className="text-sm text-blue-800">{referencedNews.title}</p>
+                  <p className="mb-1 text-xs font-medium uppercase tracking-[0.18em] text-cyan-200">引用新闻</p>
+                  <p className="text-sm text-cyan-50">{referencedNews.title}</p>
                 </div>
               </div>
             )}
-            <div className="px-4 py-3 rounded-2xl bg-white text-gray-900 rounded-tl-md border border-gray-200">
-              <p className="whitespace-pre-wrap">{removeMarkdown(message.content)}</p>
+            <div className="flex items-end gap-3">
+              <div className="rounded-[24px] rounded-tl-md border border-slate-200 bg-white px-5 py-4 text-slate-900 shadow-[0_8px_28px_rgba(15,23,42,0.06)] backdrop-blur-sm">
+                <MarkdownRenderer
+                  content={message.content}
+                  className="text-[15px] leading-7 text-slate-800"
+                  onCommandClick={onForwardToInput}
+                />
+              </div>
+              {actionColumn}
             </div>
-            <div className="flex items-center gap-1 mt-2 px-1">
-              <button
-                onClick={() => handleCopy(message.content)}
-                className="p-2 text-gray-600 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors relative group"
-                title="复制"
-              >
-                <Copy className="w-4 h-4" />
-                <span className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-                  复制
-                </span>
-              </button>
-              {onForwardToInput && (
-                <button
-                  onClick={() => onForwardToInput(message.content)}
-                  className="p-2 text-gray-600 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors relative group"
-                  title="转发"
-                >
-                  <Repeat className="w-4 h-4" />
-                  <span className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-                    转发
-                  </span>
-                </button>
-              )}
-              {onSaveToDraft && (
-                <button
-                  onClick={() => onSaveToDraft(message.content)}
-                  disabled={isSaving}
-                  className="p-2 text-blue-600 bg-blue-50 rounded-lg hover:bg-blue-100 disabled:opacity-50 transition-colors relative group"
-                  title={isSaving ? '保存中...' : '保存到草稿'}
-                >
-                  <Save className="w-4 h-4" />
-                  <span className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-                    {isSaving ? '保存中...' : '保存到草稿'}
-                  </span>
-                </button>
-              )}
-              <p className="text-xs text-gray-400 ml-auto">
-                {new Date(message.timestamp).toLocaleTimeString('zh-CN', {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })}
-              </p>
             </div>
           </div>
         </div>

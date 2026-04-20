@@ -1,110 +1,65 @@
-# AI 新闻创作工具
+# AI 助手
 
-一个基于人工智能的桌面端新闻创作平台，支持 Mac 和 Windows 系统。
+AI 助手是一个基于 Electron、React、TypeScript 和 Express 构建的桌面工作平台。它以对话为核心入口，通过工作流机制把不同日常工作任务组织为可调用的 AI 能力。
 
-## 功能特性
+当前版本已经将原有的“AI 新闻助手”能力沉淀为一个内置工作流 `新闻助手`，并支持在聊天窗口中通过 slash command 调用工作流。
 
-### MVP 核心功能（已实现）
-1. **AI 检索新闻并推送展示** - 顶部新闻推送区域，展示最新新闻
-2. **AI 读取新闻并提取主题后再创作新闻** - 对话式 AI 交互，支持引用新闻进行创作
-3. **新闻展示以及编辑操作** - 新闻管理页面，支持新建、编辑新闻
-4. **新闻推送发布** - 支持发布到官网和微信公众号
+## 核心能力
+- 聊天优先：默认首页是聊天工作台。
+- 工作流平台：支持内置工作流和自定义工作流。
+- 双命令调用：支持 `/<工作流名称>` 与 `/+<工作流名称>`。
+- 严格执行：命中工作流后，AI 优先遵循工作流定义。
+- 结果沉淀：输出内容可保存为任务结果继续编辑或发布。
 
-### 技术栈
-- **桌面框架**: Electron
-- **前端**: React 18 + TypeScript + Tailwind CSS
-- **状态管理**: Zustand
-- **路由**: React Router DOM
-- **构建工具**: Vite + electron-builder
+## 当前内置工作流
+- `新闻助手`
+  - 适合基于新闻素材做摘要、改写、标题生成、简讯与稿件初稿。
 
-## 快速开始
+## 技术栈
+- 前端：React 18 + TypeScript + Vite + Tailwind CSS
+- 桌面端：Electron
+- 后端：Express + TypeScript
+- 状态管理：Zustand
+- 测试：Jest + Testing Library
 
-### 安装依赖
+## 开发命令
 ```bash
 npm install
+npm run dev:full
 ```
 
-### 环境变量
-```bash
-cp .env.example .env
-```
-
-默认前端会请求 `VITE_API_BASE_URL`，本地开发默认为 `http://localhost:3001`。
-
-### 开发模式
+常用命令：
 ```bash
 npm run dev
+npm run dev:api:ts
+npm run typecheck:frontend
+npm run typecheck:api
+npm test -- --runInBand
 ```
 
-### 构建应用
-```bash
-# 构建所有平台
-npm run electron:build
+## 工作流调用方式
+在聊天输入框中可以直接输入：
 
-# 仅构建 Mac 版本
-npm run electron:build:mac
-
-# 仅构建 Windows 版本
-npm run electron:build:win
+```text
+/新闻助手 帮我把这条新闻改写成 300 字简讯
+/+news-assistant 输出 3 个标题备选
 ```
 
-## 项目结构
+如果先在聊天页选择了工作流，也可以直接输入自然语言任务，系统会自动按当前工作流执行。
 
-```
-AINews/
-├── electron/              # Electron 主进程代码
-│   ├── main.ts           # 主进程入口
-│   ├── preload.ts        # 预加载脚本
-│   └── menu.ts           # 应用菜单
-├── src/                  # 前端代码
-│   ├── components/       # 组件
-│   │   ├── Sidebar.tsx
-│   │   ├── NewsCard.tsx
-│   │   └── ConversationItem.tsx
-│   ├── pages/            # 页面
-│   │   ├── Chat.tsx      # 对话创作页面
-│   │   ├── NewsList.tsx  # 新闻管理页面
-│   │   └── NewsEdit.tsx  # 新闻编辑页面
-│   ├── store/            # Zustand 状态管理
-│   ├── types/            # TypeScript 类型定义
-│   ├── App.tsx           # 根组件
-│   ├── main.tsx          # 入口文件
-│   └── index.css         # 全局样式
-├── .trae/documents/      # 项目文档
-│   ├── prd.md           # 产品需求文档
-│   ├── arch.md          # 技术架构文档
-│   └── ai_news_tool_plan.md  # 实施计划
-└── package.json
-```
+## 项目文档
+- 产品需求文档：[.trae/documents/prd.md](/Users/shibo/Documents/trae_projects/AINews/.trae/documents/prd.md)
+- 技术架构文档：[.trae/documents/arch.md](/Users/shibo/Documents/trae_projects/AINews/.trae/documents/arch.md)
+- 平台改造任务文档：[.trae/documents/ai_assistant_platform_plan.md](/Users/shibo/Documents/trae_projects/AINews/.trae/documents/ai_assistant_platform_plan.md)
+- UI/UX 标准：[docs/UI_UX_STANDARDS.md](/Users/shibo/Documents/trae_projects/AINews/docs/UI_UX_STANDARDS.md)
+- 设计系统：[design-system/ai-news-tool/MASTER.md](/Users/shibo/Documents/trae_projects/AINews/design-system/ai-news-tool/MASTER.md)
 
-## 核心功能说明
+## 当前状态
+首版已完成平台化主路径：
+- AI 助手命名统一
+- 聊天主工作台
+- 工作流管理页
+- slash command 工作流调用
+- 新闻助手内置工作流适配
 
-### 1. 对话创作页面 (/chat)
-- 顶部显示最新新闻推送
-- 支持选择新闻进行引用
-- 与 AI 进行对话式交互
-- AI 基于引用的新闻进行二次创作
-
-### 2. 新闻管理页面 (/news)
-- 展示所有保存的新闻
-- 支持按发布状态筛选
-- 点击编辑按钮进入编辑页面
-
-### 3. 新闻编辑页面 (/news/edit/:id?)
-- 支持新建和编辑新闻
-- 标题和内容编辑
-- 支持发布到官网和微信公众号
-
-## 后续开发计划
-
-- [ ] 集成真实的新闻数据源 API
-- [ ] 集成真实的 LLM API
-- [ ] 实现用户认证系统
-- [ ] 实现定时新闻更新任务
-- [ ] 完善发布平台集成
-- [ ] 添加系统配置页面
-- [ ] 优化 Electron 打包和签名
-
-## 许可证
-
-MIT
+后续可以继续扩展更多工作任务工作流，让 AI 助手逐步成为统一的桌面工作入口。

@@ -8,6 +8,69 @@ export class ConfigController {
     this.configService = new ConfigService()
   }
 
+  private async resolveOllamaModelName(aiModel: {
+    baseUrl?: string
+    modelName?: string
+  }): Promise<string> {
+    if (aiModel.modelName?.trim()) {
+      return aiModel.modelName.trim()
+    }
+
+    const baseUrl = (aiModel.baseUrl || 'http://localhost:11434').replace(/\/$/, '')
+
+    try {
+      const response = await fetch(`${baseUrl}/api/tags`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      })
+
+      if (response.ok) {
+        const data = await response.json() as { models?: Array<{ name?: string; model?: string }> }
+        const firstModel = data.models?.[0]
+        const resolvedModelName = firstModel?.model || firstModel?.name
+
+        if (resolvedModelName) {
+          return resolvedModelName
+        }
+      }
+    } catch (error) {
+      console.warn('解析 Ollama 实际模型名失败:', error)
+    }
+
+    return process.env.OLLAMA_MODEL || 'gemma4:latest'
+  }
+
+  private getActiveConfiguredModel(config: Awaited<ReturnType<ConfigService['getConfig']>>) {
+    if (this.hasConfiguredAIModel(config.aiModel)) {
+      return {
+        id: config.aiModel.id,
+        name: config.aiModel.name,
+        provider: config.aiModel.provider,
+        apiKey: config.aiModel.apiKey,
+        modelName: config.aiModel.modelName,
+        baseUrl: config.aiModel.baseUrl,
+        source: 'primary' as const,
+      }
+    }
+
+    const activeModel = config.aiModels?.find((item) => item.isActive) || config.aiModels?.[0]
+    if (!activeModel) {
+      return null
+    }
+
+    return {
+      id: activeModel.id,
+      name: activeModel.name,
+      provider: activeModel.provider,
+      apiKey: activeModel.apiKey,
+      modelName: activeModel.modelName,
+      baseUrl: activeModel.baseUrl,
+      source: 'fallback' as const,
+    }
+  }
+
   private hasConfiguredAIModel(aiModel: {
     provider?: string
     apiKey?: string
@@ -27,12 +90,69 @@ export class ConfigController {
     }
   }
 
+  private async testCloudAIConnection(aiModel: {
+    provider?: string
+    apiKey?: string
+    baseUrl?: string
+    modelName?: string
+  }): Promise<{ success: boolean; message: string }> {
+    if (!aiModel.provider || !aiModel.apiKey) {
+      return {
+        success: false,
+        message: '请提供有效的 API Key',
+      }
+    }
+
+    const baseUrl =
+      (aiModel.baseUrl || 'https://api.openai.com/v1').replace(/\/$/, '')
+
+    try {
+      const response = await fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${aiModel.apiKey}`,
+        },
+        body: JSON.stringify({
+          model: aiModel.modelName,
+          messages: [{ role: 'user', content: 'ping' }],
+          max_tokens: 5,
+        }),
+      })
+
+      const contentType = response.headers.get('content-type') || ''
+      const isJson = contentType.includes('application/json')
+      const data = isJson ? await response.json() : await response.text()
+
+      if (!response.ok) {
+        const message =
+          typeof data === 'object' && data !== null && 'error' in data
+            ? JSON.stringify(data.error)
+            : `模型连接失败: ${response.status}`
+
+        return {
+          success: false,
+          message,
+        }
+      }
+
+      return {
+        success: true,
+        message: 'AI 模型连接成功',
+      }
+    } catch (error) {
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : '无法连接到云端 AI 模型',
+      }
+    }
+  }
+
   private async testOllamaConnection(aiModel: {
     baseUrl?: string
     modelName?: string
   }): Promise<{ success: boolean; message: string }> {
     const baseUrl = (aiModel.baseUrl || 'http://localhost:11434').replace(/\/$/, '')
-    const modelName = aiModel.modelName || 'gemma'
 
     try {
       const response = await fetch(`${baseUrl}/api/tags`, {
@@ -46,13 +166,44 @@ export class ConfigController {
         throw new Error(`Ollama API 调用失败: ${response.status}`)
       }
 
-      const data = await response.json() as { models?: Array<{ name: string }> }
-      const hasModel = data.models?.some(model => model.name.includes(modelName))
+      const data = await response.json() as { models?: Array<{ name?: string; model?: string }> }
+      const resolvedModelName = await this.resolveOllamaModelName(aiModel)
+      const hasModel = data.models?.some((model) => {
+        const candidate = model.model || model.name || ''
+        return candidate === resolvedModelName || candidate.includes(resolvedModelName)
+      })
 
       if (!hasModel) {
         return {
           success: false,
-          message: `未找到 ${modelName} 模型，请确保已在 Ollama 中安装该模型`,
+          message: `未找到 ${resolvedModelName} 模型，请确保已在 Ollama 中安装该模型`,
+        }
+      }
+
+      const generateResponse = await fetch(`${baseUrl}/api/generate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: resolvedModelName,
+          prompt: 'ping',
+          stream: false,
+        }),
+      })
+
+      if (!generateResponse.ok) {
+        const contentType = generateResponse.headers.get('content-type') || ''
+        const isJson = contentType.includes('application/json')
+        const data = isJson ? await generateResponse.json() : await generateResponse.text()
+        const message =
+          typeof data === 'object' && data !== null && 'error' in data
+            ? String(data.error)
+            : `Ollama generate 调用失败: ${generateResponse.status}`
+
+        return {
+          success: false,
+          message,
         }
       }
 
@@ -151,6 +302,44 @@ export class ConfigController {
     }
   }
 
+  async getActiveAIModel(req: Request, res: Response) {
+    try {
+      const { userId } = req.query
+      const config = await this.configService.getConfig(userId as string)
+      const activeModel = this.getActiveConfiguredModel(config)
+
+      if (!activeModel) {
+        return res.json({
+          configured: false,
+          provider: null,
+          configuredName: '',
+          configuredModelName: '',
+          effectiveModelName: '',
+          baseUrl: '',
+          source: null,
+        })
+      }
+
+      const effectiveModelName =
+        activeModel.provider === 'ollama'
+          ? await this.resolveOllamaModelName(activeModel)
+          : activeModel.modelName || ''
+
+      return res.json({
+        configured: true,
+        provider: activeModel.provider,
+        configuredName: activeModel.name || '',
+        configuredModelName: activeModel.modelName || '',
+        effectiveModelName,
+        baseUrl: activeModel.baseUrl || '',
+        source: activeModel.source,
+      })
+    } catch (error) {
+      console.error('获取当前生效 AI 模型失败:', error)
+      res.status(500).json({ error: '获取当前生效 AI 模型失败' })
+    }
+  }
+
   // 保存配置
   async saveConfig(req: Request, res: Response) {
     try {
@@ -175,20 +364,11 @@ export class ConfigController {
             })
           }
         } else if (aiModel.provider === 'openai' || aiModel.provider === 'anthropic' || aiModel.provider === 'google') {
-          // 测试需要 API Key 的模型
-          if (!aiModel.apiKey) {
-            return res.status(400).json({ 
-              error: '参数错误',
-              message: '请提供 API Key' 
-            })
-          }
-          try {
-            // 这里可以添加其他 AI 模型的测试逻辑
-            // 例如测试 OpenAI API 连通性
-          } catch (error) {
+          const cloudTest = await this.testCloudAIConnection(aiModel)
+          if (!cloudTest.success) {
             return res.status(400).json({ 
               error: 'AI 模型测试失败',
-              message: '无法连接到 AI 模型，请检查配置是否正确' 
+              message: cloudTest.message,
             })
           }
         } else {
@@ -281,22 +461,7 @@ export class ConfigController {
       } else if (aiModel.provider === 'llamacpp') {
         testResult = await this.testLlamaCppConnection(aiModel)
       } else if (aiModel.provider === 'openai' || aiModel.provider === 'anthropic' || aiModel.provider === 'google') {
-        // 测试需要 API Key 的模型
-        if (!aiModel.apiKey) {
-          return res.status(400).json({ 
-            error: '参数错误',
-            message: '请提供 API Key' 
-          })
-        }
-        try {
-          // 这里可以添加其他 AI 模型的测试逻辑
-          testResult = { success: true, message: 'AI 模型连接成功' }
-        } catch (error) {
-          testResult = { 
-            success: false, 
-            message: '无法连接到 AI 模型，请检查配置是否正确' 
-          }
-        }
+        testResult = await this.testCloudAIConnection(aiModel)
       } else {
         return res.status(400).json({ 
           error: '参数错误',

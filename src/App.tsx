@@ -8,6 +8,8 @@ import { Login } from './pages/Login'
 import { Register } from './pages/Register'
 import { Settings } from './pages/Settings'
 import { Config } from './pages/Config'
+import { Workflows } from './pages/Workflows'
+import { History } from './pages/History'
 import { isAuthenticated, subscribeToAuthChange } from './lib/auth'
 
 function App() {
@@ -33,19 +35,26 @@ function App() {
 
   return (
     <Router>
-      <div className="flex h-screen bg-gray-50">
+      <div className="app-shell flex h-screen overflow-hidden text-editorial-ink">
         <Sidebar />
-        <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="relative flex-1 overflow-hidden bg-transparent">
+          <div className="relative flex h-full flex-col overflow-hidden p-3 md:p-4">
+            <div className="surface-panel flex-1 overflow-hidden">
           <Routes>
-            <Route path="/" element={<Navigate to="/chat" replace />} />
-            <Route path="/chat" element={<Chat />} />
+            <Route path="/" element={<Navigate to="/chat/new" replace />} />
+            <Route path="/chat" element={<Navigate to="/chat/new" replace />} />
+            <Route path="/chat/:conversationId" element={<Chat />} />
+            <Route path="/workflows" element={<Workflows />} />
             <Route path="/news" element={<NewsList />} />
             <Route path="/news/edit/:id?" element={<NewsEdit />} />
+            <Route path="/history" element={<History />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/config" element={<Config />} />
             <Route path="/login" element={<Navigate to="/chat" replace />} />
             <Route path="/register" element={<Navigate to="/chat" replace />} />
           </Routes>
+            </div>
+          </div>
         </div>
       </div>
     </Router>

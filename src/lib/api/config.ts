@@ -1,8 +1,12 @@
-import type { UserConfig } from '@/types'
+import type { ActiveAIModelInfo, UserConfig } from '@/types'
 import { apiRequest, withJsonBody } from '@/lib/api'
 
 export function getConfig(userId: string) {
   return apiRequest<UserConfig>(`/api/config?userId=${encodeURIComponent(userId)}`)
+}
+
+export function getActiveAIModel(userId: string) {
+  return apiRequest<ActiveAIModelInfo>(`/api/config/active-model?userId=${encodeURIComponent(userId)}`)
 }
 
 export function updateConfig(payload: {

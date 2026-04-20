@@ -17,11 +17,11 @@ export class ConfigService {
         userId: '1',
         aiModel: {
           id: '',
-          name: '',
+          name: 'Ollama Gemma4',
           provider: 'ollama',
           apiKey: '',
-          modelName: '',
-          baseUrl: '',
+          modelName: process.env.OLLAMA_MODEL || 'gemma4:latest',
+          baseUrl: process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
         },
         aiModels: [],
         newsAPI: {

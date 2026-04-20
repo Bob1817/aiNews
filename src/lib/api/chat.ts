@@ -1,7 +1,12 @@
 import { apiRequest, withJsonBody } from '@/lib/api'
 
+import type { WorkflowArtifact, WorkflowDefinition, WorkflowExecution } from '@/types'
+
 interface ChatResponse {
   content: string
+  workflow?: WorkflowDefinition
+  execution?: WorkflowExecution
+  artifacts?: WorkflowArtifact[]
 }
 
 export async function chat(payload: {

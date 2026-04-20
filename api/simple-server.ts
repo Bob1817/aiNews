@@ -13,6 +13,7 @@ const configController = new ConfigController()
 
 // 配置路由
 app.get('/api/config', (req, res) => configController.getConfig(req, res))
+app.get('/api/config/active-model', (req, res) => configController.getActiveAIModel(req, res))
 app.post('/api/config', (req, res) => configController.saveConfig(req, res))
 app.put('/api/config', (req, res) => configController.saveConfig(req, res))
 app.post('/api/config/test-ai', (req, res) => configController.testAIModel(req, res))
@@ -58,6 +59,7 @@ app.listen(PORT, () => {
   console.log('可用端点:')
   console.log('- GET /api/health - 健康检查')
   console.log('- GET /api/config - 获取配置')
+  console.log('- GET /api/config/active-model - 获取当前生效 AI 模型')
   console.log('- POST /api/config - 保存配置')
   console.log('- POST /api/config/test-ai - 测试AI模型连接')
   console.log('=' .repeat(50))

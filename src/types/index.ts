@@ -61,6 +61,16 @@ export interface AIModelConfig {
   isActive: boolean
 }
 
+export interface ActiveAIModelInfo {
+  configured: boolean
+  provider: AIModelConfig['provider'] | null
+  configuredName: string
+  configuredModelName: string
+  effectiveModelName: string
+  baseUrl: string
+  source: 'primary' | 'fallback' | null
+}
+
 export interface UserConfig {
   id: string
   userId: string
@@ -98,5 +108,91 @@ export interface ConversationMessage {
   role: 'user' | 'assistant'
   content: string
   referencedNewsId?: string
+  workflowId?: string
+  workflowInvocation?: string
+  messageType?: 'plain' | 'workflow' | 'system' | 'result'
+  executionId?: string
+  artifacts?: WorkflowArtifact[]
   timestamp: string
+}
+
+export interface WorkflowInvocation {
+  primary: string
+  aliases: string[]
+  examples: string[]
+}
+
+export interface WorkflowStep {
+  id: string
+  title: string
+  instruction: string
+  expectedOutput?: string
+}
+
+export interface WorkflowFieldDefinition {
+  name: string
+  type: 'text' | 'textarea' | 'tags' | 'json'
+  label: string
+  placeholder?: string
+  required?: boolean
+}
+
+export interface WorkflowArtifact {
+  id: string
+  type: 'text' | 'markdown' | 'news-draft' | 'summary'
+  title: string
+  content: string
+}
+
+export interface WorkflowDefinition {
+  id: string
+  name: string
+  displayName: string
+  description: string
+  invocation: WorkflowInvocation
+  systemInstruction: string
+  steps: WorkflowStep[]
+  inputSchema: WorkflowFieldDefinition[]
+  outputSchema: WorkflowFieldDefinition[]
+  constraints: string[]
+  tools: string[]
+  capabilities: string[]
+  examples: string[]
+  extensionNotes: string
+  isBuiltIn: boolean
+  status: 'active' | 'draft'
+  createdAt: string
+  updatedAt: string
+}
+
+export interface WorkflowCommandParseResult {
+  matched: boolean
+  rawCommand?: string
+  invocation?: string
+  remainingInput?: string
+  workflow?: WorkflowDefinition
+  error?: string
+}
+
+export interface WorkflowExecution {
+  id: string
+  workflowId: string
+  workflowName: string
+  invocation: string
+  userId: string
+  input: string
+  output: string
+  status: 'running' | 'completed' | 'failed'
+  artifacts: WorkflowArtifact[]
+  createdAt: string
+  completedAt?: string
+  error?: string
+}
+
+export interface ConversationHistory {
+  id: string
+  title: string
+  messages: ConversationMessage[]
+  createdAt: string
+  updatedAt: string
 }

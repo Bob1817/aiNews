@@ -7,6 +7,17 @@ export default {
   theme: {
     extend: {
       colors: {
+        editorial: {
+          night: '#f5f7fb',
+          panel: '#ffffff',
+          soft: '#f8fafc',
+          line: 'rgba(148, 163, 184, 0.24)',
+          ink: '#0f172a',
+          muted: '#64748b',
+          violet: '#2563eb',
+          indigo: '#3b82f6',
+          cyan: '#0891b2',
+        },
         // Anthropic brand colors
         'anthropic-dark': '#141413',
         'anthropic-light': '#faf9f5',
@@ -23,9 +34,9 @@ export default {
         light: '#faf9f5',
       },
       fontFamily: {
-        sans: ['Poppins', 'Arial', 'sans-serif'],
-        serif: ['Lora', 'Georgia', 'serif'],
-        display: ['Poppins', 'Arial', 'sans-serif'],
+        sans: ['Roboto', 'Arial', 'sans-serif'],
+        serif: ['Newsreader', 'Georgia', 'serif'],
+        display: ['Newsreader', 'Georgia', 'serif'],
       },
       scrollbar: {
         hide: {

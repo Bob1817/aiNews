@@ -1,19 +1,83 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Plus, Edit, Share2, Calendar, CheckCircle2, Search, Filter, Trash2, Eye, ExternalLink } from 'lucide-react'
+import {
+  Calendar,
+  CheckCircle2,
+  Download,
+  Edit,
+  ExternalLink,
+  Eye,
+  FileCode,
+  FileJson,
+  FileText,
+  Filter,
+  MessageSquare,
+  Search,
+  Share2,
+  Trash2,
+  Workflow,
+} from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import { useAppStore } from '@/store'
-import type { SavedNews, NewsCategory } from '@/types'
+import type { NewsCategory, SavedNews } from '@/types'
 import { getCategories } from '@/lib/api/categories'
-import { getSavedNews, deleteNews } from '@/lib/api/news'
+import { deleteNews, getSavedNews } from '@/lib/api/news'
 import { getDefaultCategories, getMockSavedNews } from '@/lib/fallbacks'
+
+type SavedNewsWithIndustries = SavedNews & { industries?: string[] }
+
+const industries = ['科技', '医疗', '汽车', '新能源', '云计算']
+
+function SummaryCard({
+  label,
+  value,
+  hint,
+}: {
+  label: string
+  value: string
+  hint: string
+}) {
+  return (
+    <div className="rounded-[28px] border border-slate-200 bg-white px-5 py-4 shadow-[0_20px_60px_rgba(15,23,42,0.05)]">
+      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
+        {label}
+      </p>
+      <p className="mt-3 text-2xl font-semibold text-slate-900">{value}</p>
+      <p className="mt-1 text-sm text-slate-500">{hint}</p>
+    </div>
+  )
+}
+
+function FilterChip({
+  active,
+  label,
+  onClick,
+}: {
+  active: boolean
+  label: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`rounded-full px-4 py-2 text-sm font-medium transition-all ${
+        active
+          ? 'bg-slate-900 text-white shadow-[0_12px_30px_rgba(15,23,42,0.18)]'
+          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+      }`}
+    >
+      {label}
+    </button>
+  )
+}
 
 export function NewsList() {
   const { savedNews, setSavedNews } = useAppStore()
   const [filter, setFilter] = useState<'all' | 'published' | 'draft'>('all')
   const [searchKeyword, setSearchKeyword] = useState('')
   const [industryFilter, setIndustryFilter] = useState('all')
-  const industries = ['科技', '医疗', '汽车', '新能源', '云计算']
+  const [sortBy, setSortBy] = useState<'updatedAt' | 'createdAt' | 'title'>('updatedAt')
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
   const [categories, setCategories] = useState<NewsCategory[]>([])
   const [, setIsLoadingCategories] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
@@ -21,25 +85,139 @@ export function NewsList() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [previewNews, setPreviewNews] = useState<SavedNews | null>(null)
   const [showPreview, setShowPreview] = useState(false)
+  const [downloadMenuOpen, setDownloadMenuOpen] = useState<string | null>(null)
+
+  const getFileTypeIcon = (content: string) => {
+    try {
+      JSON.parse(content)
+      return { icon: FileJson, color: 'text-fuchsia-500', label: 'JSON' }
+    } catch {
+      if (
+        content.includes('```') ||
+        content.includes('function ') ||
+        content.includes('import ') ||
+        content.includes('export ')
+      ) {
+        return { icon: FileCode, color: 'text-sky-500', label: '代码' }
+      }
+      if (
+        content.includes('# ') ||
+        content.includes('## ') ||
+        content.includes('### ') ||
+        content.includes('**') ||
+        content.includes('* ')
+      ) {
+        return { icon: FileText, color: 'text-emerald-500', label: 'Markdown' }
+      }
+      return { icon: FileText, color: 'text-slate-400', label: '文本' }
+    }
+  }
+
+  const getTaskType = (news: SavedNews) => {
+    if (news.content.includes('工作流') || news.content.includes('workflow')) {
+      return { icon: Workflow, label: '工作流结果' }
+    }
+    if (news.content.includes('AI 助手') || news.content.includes('AI assistant')) {
+      return { icon: MessageSquare, label: 'AI 对话' }
+    }
+    return { icon: FileText, label: '任务结果' }
+  }
+
+  const downloadFile = (news: SavedNews, format: 'md' | 'txt' | 'json' | 'html') => {
+    let content: string
+    let mimeType: string
+    let extension: string
+
+    switch (format) {
+      case 'md':
+        content = `# ${news.title}\n\n${news.content}`
+        mimeType = 'text/markdown'
+        extension = 'md'
+        break
+      case 'txt':
+        content = `${news.title}\n\n${news.content.replace(/[#*`]/g, '')}`
+        mimeType = 'text/plain'
+        extension = 'txt'
+        break
+      case 'json':
+        content = JSON.stringify(
+          {
+            title: news.title,
+            content: news.content,
+            createdAt: news.createdAt,
+            updatedAt: news.updatedAt,
+            isPublished: news.isPublished,
+            industries: news.industries,
+            categories: news.categories,
+          },
+          null,
+          2
+        )
+        mimeType = 'application/json'
+        extension = 'json'
+        break
+      case 'html':
+        content = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>${news.title}</title>
+  <style>
+    body { font-family: Arial, sans-serif; line-height: 1.6; margin: 20px; color: #0f172a; }
+    h1 { color: #0f172a; }
+    .content { margin-top: 20px; }
+    .meta { color: #64748b; font-size: 0.9em; margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <h1>${news.title}</h1>
+  <div class="content">${news.content
+    .replace(/\n/g, '<br>')
+    .replace(/# (.*?)(?=\n)/g, '<h2>$1</h2>')
+    .replace(/## (.*?)(?=\n)/g, '<h3>$1</h3>')}</div>
+  <div class="meta">
+    <p>更新时间: ${new Date(news.updatedAt).toLocaleString('zh-CN')}</p>
+    ${news.isPublished ? '<p>状态: 已发布</p>' : '<p>状态: 草稿</p>'}
+  </div>
+</body>
+</html>`
+        mimeType = 'text/html'
+        extension = 'html'
+        break
+      default:
+        content = news.content
+        mimeType = 'text/plain'
+        extension = 'txt'
+    }
+
+    const blob = new Blob([content], { type: mimeType })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${news.title.replace(/[^a-zA-Z0-9\u4e00-\u9fa5]/g, '_')}.${extension}`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    setDownloadMenuOpen(null)
+  }
 
   useEffect(() => {
-    // 从后端 API 获取保存的新闻
     const fetchSavedNews = async () => {
       try {
         const news = await getSavedNews('1')
         setSavedNews(news)
-      } catch (error) {
+      } catch {
         setSavedNews(getMockSavedNews())
       }
     }
 
-    // 从后端 API 获取分类列表
     const fetchCategories = async () => {
       setIsLoadingCategories(true)
       try {
         const data = await getCategories()
         setCategories(data)
-      } catch (error) {
+      } catch {
         setCategories(getDefaultCategories())
       } finally {
         setIsLoadingCategories(false)
@@ -50,39 +228,49 @@ export function NewsList() {
     fetchCategories()
   }, [setSavedNews])
 
-  const filteredNews = (savedNews as (SavedNews & { industries?: string[] })[]).filter((news) => {
-    // 状态过滤
-    if (filter === 'published' && !news.isPublished) return false
-    if (filter === 'draft' && news.isPublished) return false
-    
-    // 关键词搜索
-    if (searchKeyword && !news.title.includes(searchKeyword) && !news.content.includes(searchKeyword)) {
-      return false
-    }
-    
-    // 行业筛选
-    if (industryFilter !== 'all') {
-      return news.industries?.includes(industryFilter) || false
-    }
-    
-    return true
-  })
+  const filteredNews = useMemo(() => {
+    return (savedNews as SavedNewsWithIndustries[])
+      .filter((news) => {
+        if (filter === 'published' && !news.isPublished) return false
+        if (filter === 'draft' && news.isPublished) return false
 
-  // 处理删除确认
-  const handleDeleteConfirm = (id: string) => {
-    setDeleteId(id)
-    setShowDeleteConfirm(true)
-  }
+        if (searchKeyword) {
+          const keyword = searchKeyword.toLowerCase()
+          const titleMatch = news.title.toLowerCase().includes(keyword)
+          const contentMatch = news.content.toLowerCase().includes(keyword)
+          if (!titleMatch && !contentMatch) return false
+        }
 
-  // 处理删除
+        if (industryFilter !== 'all') {
+          return news.industries?.includes(industryFilter) || false
+        }
+
+        return true
+      })
+      .sort((a, b) => {
+        let comparison = 0
+
+        if (sortBy === 'updatedAt' || sortBy === 'createdAt') {
+          comparison = new Date(a[sortBy]).getTime() - new Date(b[sortBy]).getTime()
+        } else {
+          comparison = a.title.localeCompare(b.title, 'zh-CN')
+        }
+
+        return sortOrder === 'asc' ? comparison : -comparison
+      })
+  }, [filter, industryFilter, savedNews, searchKeyword, sortBy, sortOrder])
+
+  const publishedCount = savedNews.filter((item) => item.isPublished).length
+  const draftCount = savedNews.length - publishedCount
+  const activeCategories = new Set(savedNews.flatMap((item) => item.categories ?? [])).size
+
   const handleDelete = async () => {
     if (!deleteId) return
-    
+
     try {
       setIsDeleting(true)
       await deleteNews(deleteId)
-      // 从状态中移除删除的新闻
-      setSavedNews(savedNews.filter(news => news.id !== deleteId))
+      setSavedNews(savedNews.filter((news) => news.id !== deleteId))
     } catch (error) {
       console.error('删除新闻失败:', error)
     } finally {
@@ -92,333 +280,343 @@ export function NewsList() {
     }
   }
 
-  // 取消删除
-  const handleCancelDelete = () => {
-    setShowDeleteConfirm(false)
-    setDeleteId(null)
-  }
-
-  // 处理预览
-  const handlePreview = (news: SavedNews) => {
-    setPreviewNews(news)
-    setShowPreview(true)
-  }
-
-  // 关闭预览
-  const handleClosePreview = () => {
-    setShowPreview(false)
-    setPreviewNews(null)
-  }
-
   return (
-    <div className="flex flex-col h-full bg-gray-50">
-      <div className="bg-white border-b border-gray-200 p-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">新闻管理</h1>
-            <p className="text-gray-500 mt-1">管理您保存和创作的所有新闻</p>
-          </div>
-          <Link
-            to="/news/edit"
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            <Plus className="w-4 h-4" />
-            新建新闻
-          </Link>
-        </div>
-      </div>
+    <div className="h-full overflow-y-auto bg-[linear-gradient(180deg,#f8fafc_0%,#eef2ff_100%)]">
+      <div className="mx-auto flex min-h-full w-full max-w-[1600px] flex-col gap-6 px-6 py-6 lg:px-10">
+        <section className="rounded-[32px] border border-slate-200 bg-white/95 p-8 shadow-[0_30px_80px_rgba(15,23,42,0.08)]">
+          <div className="flex flex-col gap-8 xl:flex-row xl:items-end xl:justify-between">
+            <div className="max-w-3xl">
+              <p className="text-xs font-semibold uppercase tracking-[0.28em] text-sky-600">
+                Task Results
+              </p>
+              <h1 className="mt-3 font-display text-3xl text-slate-900 md:text-4xl">
+                任务结果管理台
+              </h1>
+              <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600 md:text-base">
+                集中查看 AI 助手沉淀的工作结果、已发布内容和草稿文档。这里作为内容整理区存在，负责筛选、回看和继续处理产出。
+              </p>
+            </div>
 
-      <div className="bg-white border-b border-gray-200 px-6 py-4">
-        <div className="flex flex-col md:flex-row gap-4 mb-4">
-          <div className="relative flex-1">
-            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-              <Search className="w-4 h-4 text-gray-400" />
+            <div className="grid gap-3 sm:grid-cols-3 xl:min-w-[520px]">
+              <SummaryCard label="结果总数" value={String(savedNews.length)} hint="全部任务输出与文稿" />
+              <SummaryCard label="已发布" value={String(publishedCount)} hint="已推送到对外渠道" />
+              <SummaryCard label="分类覆盖" value={String(activeCategories)} hint="已使用的内容分类" />
             </div>
-            <input
-              type="text"
-              value={searchKeyword}
-              onChange={(e) => setSearchKeyword(e.target.value)}
-              placeholder="搜索新闻标题或内容..."
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            />
           </div>
-          <div className="relative w-full md:w-48">
-            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-              <Filter className="w-4 h-4 text-gray-400" />
-            </div>
-            <select
-              value={industryFilter}
-              onChange={(e) => setIndustryFilter(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            >
-              <option value="all">全行业</option>
-              {industries.map((industry) => (
-                <option key={industry} value={industry}>{industry}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-        <div className="flex gap-4">
-          {(['all', 'published', 'draft'] as const).map((f) => (
-            <button
-              key={f}
-              onClick={() => setFilter(f)}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                filter === f
-                  ? 'bg-blue-100 text-blue-700'
-                  : 'text-gray-600 hover:bg-gray-100'
-              }`}
-            >
-              {f === 'all' && '全部'}
-              {f === 'published' && '已发布'}
-              {f === 'draft' && '草稿'}
-            </button>
-          ))}
-        </div>
-      </div>
+        </section>
 
-      <div className="flex-1 overflow-y-auto p-6">
-        {filteredNews.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-center">
-            <div className="w-20 h-20 bg-gray-100 rounded-2xl flex items-center justify-center mb-4">
-              <Plus className="w-10 h-10 text-gray-400" />
-            </div>
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">暂无新闻</h3>
-            <p className="text-gray-500 mb-4">开始创建您的第一篇新闻吧</p>
-            <Link
-              to="/news/edit"
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              <Plus className="w-4 h-4" />
-              新建新闻
-            </Link>
-          </div>
-        ) : (
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {filteredNews.map((news) => (
-              <div
-                key={news.id}
-                className="bg-white rounded-xl border border-gray-200 p-5 hover:shadow-md transition-shadow flex flex-col min-h-[320px]"
+        <section className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-[0_24px_60px_rgba(15,23,42,0.06)]">
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.4fr)_220px_220px]">
+            <label className="relative">
+              <span className="sr-only">搜索任务结果</span>
+              <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                value={searchKeyword}
+                onChange={(e) => setSearchKeyword(e.target.value)}
+                placeholder="搜索标题、正文或工作流输出内容"
+                className="h-12 w-full rounded-2xl border border-slate-200 bg-slate-50 pl-11 pr-4 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:bg-white focus:ring-4 focus:ring-sky-100"
+              />
+            </label>
+
+            <label className="relative">
+              <Filter className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <select
+                value={industryFilter}
+                onChange={(e) => setIndustryFilter(e.target.value)}
+                className="h-12 w-full appearance-none rounded-2xl border border-slate-200 bg-slate-50 pl-11 pr-4 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:bg-white focus:ring-4 focus:ring-sky-100"
               >
-                <div className="flex-1 flex flex-col">
-                  <div className="flex flex-wrap items-start justify-between mb-3 gap-2">
-                  <div className="flex items-center gap-2">
-                    {news.isPublished ? (
-                      <span className="flex items-center gap-1 text-xs font-medium text-green-600 bg-green-50 px-2 py-1 rounded">
-                        <CheckCircle2 className="w-3 h-3" />
-                        已发布
-                      </span>
-                    ) : (
-                      <span className="text-xs font-medium text-gray-500 bg-gray-100 px-2 py-1 rounded">
-                        草稿
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => handlePreview(news)}
-                      className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-                      title="预览"
-                    >
-                      <Eye className="w-4 h-4" />
-                    </button>
-                    {news.url && (
-                      <a
-                        href={news.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-                        title="打开原始链接"
-                      >
-                        <ExternalLink className="w-4 h-4" />
-                      </a>
-                    )}
+                <option value="all">全部行业</option>
+                {industries.map((industry) => (
+                  <option key={industry} value={industry}>
+                    {industry}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="relative">
+              <Calendar className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <select
+                value={`${sortBy}-${sortOrder}`}
+                onChange={(e) => {
+                  const [newSortBy, newSortOrder] = e.target.value.split('-')
+                  setSortBy(newSortBy as 'updatedAt' | 'createdAt' | 'title')
+                  setSortOrder(newSortOrder as 'asc' | 'desc')
+                }}
+                className="h-12 w-full appearance-none rounded-2xl border border-slate-200 bg-slate-50 pl-11 pr-4 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:bg-white focus:ring-4 focus:ring-sky-100"
+              >
+                <option value="updatedAt-desc">最新更新</option>
+                <option value="updatedAt-asc">最早更新</option>
+                <option value="createdAt-desc">最新创建</option>
+                <option value="createdAt-asc">最早创建</option>
+                <option value="title-asc">标题升序</option>
+                <option value="title-desc">标题降序</option>
+              </select>
+            </label>
+          </div>
+
+          <div className="mt-5 flex flex-wrap items-center gap-3">
+            <FilterChip active={filter === 'all'} label={`全部 ${savedNews.length}`} onClick={() => setFilter('all')} />
+            <FilterChip active={filter === 'published'} label={`已发布 ${publishedCount}`} onClick={() => setFilter('published')} />
+            <FilterChip active={filter === 'draft'} label={`草稿 ${draftCount}`} onClick={() => setFilter('draft')} />
+            <div className="ml-auto text-sm text-slate-500">
+              当前结果 <span className="font-semibold text-slate-900">{filteredNews.length}</span> 条
+            </div>
+          </div>
+        </section>
+
+        {filteredNews.length === 0 ? (
+          <section className="flex min-h-[420px] flex-col items-center justify-center rounded-[32px] border border-dashed border-slate-300 bg-white/80 px-6 text-center shadow-[0_24px_60px_rgba(15,23,42,0.04)]">
+            <div className="flex h-20 w-20 items-center justify-center rounded-[24px] bg-slate-100">
+              <FileText className="h-10 w-10 text-slate-400" />
+            </div>
+            <h2 className="mt-6 text-xl font-semibold text-slate-900">暂时没有匹配的结果</h2>
+            <p className="mt-2 max-w-md text-sm leading-7 text-slate-500">
+              你可以调整筛选条件，或者回到聊天工作台触发新的工作流。新的任务结果会自动沉淀到这里继续处理。
+            </p>
+          </section>
+        ) : (
+          <section className="grid gap-5 xl:grid-cols-2 2xl:grid-cols-3">
+            {filteredNews.map((news) => {
+              const taskType = getTaskType(news)
+              const TaskIcon = taskType.icon
+              const fileType = getFileTypeIcon(news.content)
+              const FileIcon = fileType.icon
+
+              return (
+                <article
+                  key={news.id}
+                  className="group flex min-h-[380px] flex-col rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_22px_50px_rgba(15,23,42,0.05)] transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_26px_70px_rgba(15,23,42,0.09)]"
+                >
+                  <div className="flex items-start justify-between gap-3">
                     <div className="flex flex-wrap gap-2">
-                      {news.industries && news.industries.map((industry) => (
-                        <span key={industry} className="text-xs font-medium text-blue-600 bg-blue-50 px-2 py-1 rounded">
-                          {industry}
+                      {news.isPublished ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
+                          <CheckCircle2 className="h-3.5 w-3.5" />
+                          已发布
                         </span>
-                      ))}
-                      {news.categories && news.categories.map((categoryId) => {
-                        const category = categories.find(cat => cat.id === categoryId)
-                        return category ? (
-                          <span key={categoryId} className="text-xs font-medium text-purple-600 bg-purple-50 px-2 py-1 rounded">
-                            {category.name}
-                          </span>
-                        ) : null
-                      })}
+                      ) : (
+                        <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
+                          草稿
+                        </span>
+                      )}
+                      <span className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700">
+                        <TaskIcon className="h-3.5 w-3.5" />
+                        {taskType.label}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => {
+                          setPreviewNews(news)
+                          setShowPreview(true)
+                        }}
+                        className="rounded-xl border border-slate-200 p-2 text-slate-500 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
+                        title="预览"
+                      >
+                        <Eye className="h-4 w-4" />
+                      </button>
+                      {news.url && (
+                        <a
+                          href={news.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="rounded-xl border border-slate-200 p-2 text-slate-500 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
+                          title="打开原始链接"
+                        >
+                          <ExternalLink className="h-4 w-4" />
+                        </a>
+                      )}
                     </div>
                   </div>
-                </div>
 
-                  <h3 className="font-semibold text-gray-900 mb-2 line-clamp-2">
-                    {news.title}
-                  </h3>
+                  <div className="mt-5 flex items-center gap-3">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100">
+                      <FileIcon className={`h-6 w-6 ${fileType.color}`} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <h3 className="line-clamp-2 text-lg font-semibold text-slate-900">
+                        {news.title}
+                      </h3>
+                      <p className="mt-1 text-sm text-slate-500">{fileType.label} 内容</p>
+                    </div>
+                  </div>
 
-                  <p className="text-sm text-gray-600 line-clamp-3 flex-1 mb-4">
-                    {news.content}
+                  <p className="mt-5 line-clamp-5 text-sm leading-7 text-slate-600">
+                    {news.content.length > 220 ? `${news.content.slice(0, 220)}...` : news.content}
                   </p>
 
-                  <div className="flex items-center justify-between text-xs text-gray-400 mb-4">
-                    <div className="flex items-center gap-1">
-                      <Calendar className="w-3 h-3" />
+                  <div className="mt-5 grid gap-2 rounded-2xl bg-slate-50 p-4 text-sm text-slate-500 sm:grid-cols-3">
+                    <div className="flex items-center gap-2">
+                      <Calendar className="h-4 w-4 text-slate-400" />
                       {new Date(news.updatedAt).toLocaleDateString('zh-CN')}
                     </div>
-                    {news.publishedTo && news.publishedTo.length > 0 && (
-                      <div className="flex items-center gap-1">
-                        <Share2 className="w-3 h-3" />
-                        {news.publishedTo.length} 平台
-                      </div>
-                    )}
+                    <div className="flex items-center gap-2">
+                      <FileText className="h-4 w-4 text-slate-400" />
+                      {news.content.length} 字符
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Share2 className="h-4 w-4 text-slate-400" />
+                      {news.publishedTo?.length ? `${news.publishedTo.length} 平台` : '未发布'}
+                    </div>
                   </div>
-                </div>
 
-                <div className="flex gap-2 mt-auto">
-                  <Link
-                    to={`/news/edit/${news.id}`}
-                    className="flex-1 flex items-center justify-center gap-2 px-3 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
-                  >
-                    <Edit className="w-4 h-4" />
-                    编辑
-                  </Link>
-                  <button
-                    onClick={() => handleDeleteConfirm(news.id)}
-                    disabled={isDeleting}
-                    className="flex items-center justify-center gap-2 px-3 py-2 text-sm text-red-600 bg-red-50 rounded-lg hover:bg-red-100 disabled:opacity-50 transition-colors"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                    删除
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
+                  <div className="mt-5 flex flex-wrap gap-2">
+                    {news.industries?.map((industry) => (
+                      <span key={industry} className="rounded-full bg-sky-50 px-3 py-1 text-xs font-medium text-sky-700">
+                        {industry}
+                      </span>
+                    ))}
+                    {news.categories?.map((categoryId) => {
+                      const category = categories.find((item) => item.id === categoryId)
+                      return category ? (
+                        <span
+                          key={categoryId}
+                          className="rounded-full bg-violet-50 px-3 py-1 text-xs font-medium text-violet-700"
+                        >
+                          {category.name}
+                        </span>
+                      ) : null
+                    })}
+                  </div>
+
+                  <div className="mt-auto flex flex-wrap items-center gap-3 pt-6">
+                    <Link
+                      to={`/news/edit/${news.id}`}
+                      className="inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-slate-800"
+                    >
+                      <Edit className="h-4 w-4" />
+                      编辑内容
+                    </Link>
+
+                    <div className="relative">
+                      <button
+                        onClick={() =>
+                          setDownloadMenuOpen(downloadMenuOpen === news.id ? null : news.id)
+                        }
+                        className="inline-flex items-center gap-2 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-2.5 text-sm font-medium text-sky-700 transition hover:bg-sky-100"
+                      >
+                        <Download className="h-4 w-4" />
+                        下载
+                      </button>
+
+                      {downloadMenuOpen === news.id && (
+                        <div className="absolute left-0 top-full z-10 mt-2 w-52 rounded-2xl border border-slate-200 bg-white p-2 shadow-[0_18px_40px_rgba(15,23,42,0.12)]">
+                          {[
+                            { key: 'md', label: 'Markdown (.md)', icon: FileText, color: 'text-emerald-500' },
+                            { key: 'txt', label: '文本文件 (.txt)', icon: FileText, color: 'text-slate-400' },
+                            { key: 'json', label: 'JSON (.json)', icon: FileJson, color: 'text-fuchsia-500' },
+                            { key: 'html', label: 'HTML (.html)', icon: FileCode, color: 'text-sky-500' },
+                          ].map((item) => (
+                            <button
+                              key={item.key}
+                              onClick={() => downloadFile(news, item.key as 'md' | 'txt' | 'json' | 'html')}
+                              className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-slate-700 transition hover:bg-slate-50"
+                            >
+                              <item.icon className={`h-4 w-4 ${item.color}`} />
+                              {item.label}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <button
+                      onClick={() => {
+                        setDeleteId(news.id)
+                        setShowDeleteConfirm(true)
+                      }}
+                      disabled={isDeleting}
+                      className="inline-flex items-center gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-medium text-rose-700 transition hover:bg-rose-100 disabled:opacity-50"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      删除
+                    </button>
+                  </div>
+                </article>
+              )
+            })}
+          </section>
         )}
       </div>
 
-      {/* 删除确认弹窗 */}
       {showDeleteConfirm && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-6 max-w-md w-full">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">确认删除</h3>
-            <p className="text-gray-600 mb-6">
-              确定要删除这篇新闻吗？此操作不可撤销。
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-[28px] border border-slate-200 bg-white p-7 shadow-[0_28px_90px_rgba(15,23,42,0.18)]">
+            <h3 className="text-xl font-semibold text-slate-900">确认删除这条结果？</h3>
+            <p className="mt-3 text-sm leading-7 text-slate-500">
+              删除后将无法在任务结果列表中继续编辑或下载该内容。建议仅在确认不再需要时执行。
             </p>
-            <div className="flex gap-3 justify-end">
+            <div className="mt-7 flex gap-3">
               <button
-                onClick={handleCancelDelete}
-                disabled={isDeleting}
-                className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-100 disabled:opacity-50 transition-colors"
+                onClick={() => {
+                  setShowDeleteConfirm(false)
+                  setDeleteId(null)
+                }}
+                className="flex-1 rounded-2xl bg-slate-100 px-4 py-3 text-sm font-medium text-slate-700 transition hover:bg-slate-200"
               >
                 取消
               </button>
               <button
                 onClick={handleDelete}
                 disabled={isDeleting}
-                className="px-4 py-2 text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors flex items-center gap-2"
+                className="flex-1 rounded-2xl bg-rose-600 px-4 py-3 text-sm font-medium text-white transition hover:bg-rose-700 disabled:opacity-50"
               >
-                {isDeleting && (
-                  <svg className="w-4 h-4 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                )}
-                {isDeleting ? '删除中...' : '删除'}
+                {isDeleting ? '删除中...' : '确认删除'}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* 预览弹窗 */}
       {showPreview && previewNews && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-6">
-          <div className="bg-white rounded-xl p-8 max-w-3xl w-full max-h-[80vh] flex flex-col">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="text-xl font-semibold text-gray-900">新闻预览</h3>
-              <div className="flex gap-1">
-                <Link
-                  to={`/news/edit/${previewNews.id}`}
-                  className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-                  title="编辑"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
-                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-                  </svg>
-                </Link>
-                <button
-                  onClick={() => handleDeleteConfirm(previewNews.id)}
-                  className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-gray-100 rounded-lg transition-colors"
-                  title="删除"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
-                    <path d="M3 6h18"></path>
-                    <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
-                    <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path>
-                  </svg>
-                </button>
-                <button
-                  onClick={handleClosePreview}
-                  className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-                  title="关闭"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
-                    <line x1="18" y1="6" x2="6" y2="18"></line>
-                    <line x1="6" y1="6" x2="18" y2="18"></line>
-                  </svg>
-                </button>
-              </div>
-            </div>
-            
-            <div className="border-b border-gray-200 pb-1 mb-1">
-              <h2 className="text-2xl font-bold text-gray-900 mb-2">{previewNews.title}</h2>
-              <div className="flex items-center gap-4 text-sm text-gray-500 my-2">
-                <div className="flex items-center gap-1">
-                  <Calendar className="w-4 h-4" />
-                  {new Date(previewNews.updatedAt).toLocaleDateString('zh-CN')}
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 px-4 py-8 backdrop-blur-sm">
+          <div className="flex max-h-full w-full max-w-4xl flex-col overflow-hidden rounded-[32px] border border-slate-200 bg-white shadow-[0_36px_100px_rgba(15,23,42,0.2)]">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-8 py-6">
+              <div className="min-w-0">
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-sky-600">
+                  Preview
+                </p>
+                <h3 className="mt-2 line-clamp-2 text-2xl font-semibold text-slate-900">
+                  {previewNews.title}
+                </h3>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {previewNews.categories?.map((categoryId) => {
+                    const category = categories.find((item) => item.id === categoryId)
+                    return category ? (
+                      <span
+                        key={categoryId}
+                        className="rounded-full bg-violet-50 px-3 py-1 text-xs font-medium text-violet-700"
+                      >
+                        {category.name}
+                      </span>
+                    ) : null
+                  })}
                 </div>
-                {previewNews.isPublished && (
-                  <div className="flex items-center gap-1">
-                    <CheckCircle2 className="w-4 h-4 text-green-500" />
-                    已发布
-                  </div>
-                )}
               </div>
-              <div className="flex flex-wrap gap-2 my-2">
-                {previewNews.industries && previewNews.industries.map((industry) => (
-                  <span key={industry} className="text-xs font-medium text-blue-600 bg-blue-50 px-2 py-1 rounded">
-                    {industry}
-                  </span>
-                ))}
-                {previewNews.categories && previewNews.categories.map((categoryId) => {
-                  const category = categories.find(cat => cat.id === categoryId)
-                  return category ? (
-                    <span key={categoryId} className="text-xs font-medium text-purple-600 bg-purple-50 px-2 py-1 rounded">
-                      {category.name}
-                    </span>
-                  ) : null
-                })}
-              </div>
+              <button
+                onClick={() => {
+                  setShowPreview(false)
+                  setPreviewNews(null)
+                }}
+                className="rounded-2xl bg-slate-100 px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-200"
+              >
+                关闭
+              </button>
             </div>
-            
-            <div className="flex-1 overflow-y-auto scrollbar-hide">
-              <div className="prose max-w-none py-6 pb-12 bg-gray-50 rounded-lg mb-6 space-y-6">
-                <ReactMarkdown
-                  components={{
-                    h1: ({ children }) => <h1 className="text-2xl font-bold mb-4 indent-0">{children}</h1>,
-                    h2: ({ children }) => <h2 className="text-xl font-bold mb-3 indent-0">{children}</h2>,
-                    h3: ({ children }) => <h3 className="text-lg font-bold mb-2 indent-0">{children}</h3>,
-                    p: ({ children }) => <p className="leading-relaxed indent-8">{children}</p>,
-                    ul: ({ children }) => <ul className="space-y-2">{children}</ul>,
-                    li: ({ children }) => <li className="leading-relaxed">{children}</li>,
-                  }}
-                >
-                  {previewNews.content}
-                </ReactMarkdown>
-              </div>
-              
 
+            <div className="overflow-y-auto px-8 py-6">
+              <div className="mb-6 grid gap-3 rounded-2xl bg-slate-50 p-4 text-sm text-slate-500 sm:grid-cols-3">
+                <div>更新时间：{new Date(previewNews.updatedAt).toLocaleString('zh-CN')}</div>
+                <div>状态：{previewNews.isPublished ? '已发布' : '草稿'}</div>
+                <div>字数：{previewNews.content.length}</div>
+              </div>
+
+              <article className="prose prose-slate max-w-none prose-headings:font-display prose-a:text-sky-600">
+                <ReactMarkdown>{previewNews.content}</ReactMarkdown>
+              </article>
             </div>
           </div>
         </div>

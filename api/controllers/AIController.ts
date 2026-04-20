@@ -1,18 +1,30 @@
 import { Request, Response } from 'express'
 import { AIService } from '../services/AIService'
+import { WorkflowExecutionService } from '../services/WorkflowExecutionService'
 
 export class AIController {
   private aiService: AIService
+  private workflowExecutionService: WorkflowExecutionService
 
   constructor() {
     this.aiService = new AIService()
+    this.workflowExecutionService = new WorkflowExecutionService()
   }
 
   // AI 对话
   async chat(req: Request, res: Response) {
     try {
       const { userId, message, referencedNewsId, history } = req.body
-      const response = await this.aiService.chat(userId, message, referencedNewsId, history)
+      const parsed = await this.workflowExecutionService.parseCommand(message)
+      const response = parsed.matched
+        ? await this.workflowExecutionService.executeParsedCommand({
+            userId,
+            parsed,
+            message,
+            referencedNewsId,
+            history,
+          })
+        : await this.aiService.chat(userId, message, referencedNewsId, history)
       res.json(response)
     } catch (error) {
       console.error('AI 对话错误:', error)

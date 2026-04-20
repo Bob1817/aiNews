@@ -99,7 +99,7 @@ export function getMockChatResponse(selectedNews: NewsArticle | null): Conversat
     role: 'assistant',
     content: selectedNews
       ? `基于您引用的新闻"${selectedNews.title}"，我为您创作了一篇新闻稿...\n\n这是一篇关于${selectedNews.relatedKeywords.join('、')}的深度报道...`
-      : '您好！我是 AI 新闻助手。您可以从上方选择新闻引用，然后让我帮您进行二次创作。',
+      : '您好！我是 AI 助手。您可以直接聊天，或在输入框中使用 /工作流名称 来调用具体工作流。',
     timestamp: new Date().toISOString(),
   }
 }

@@ -203,9 +203,11 @@ export function testNewsApi(_payload: {
   apiKey: string
   baseUrl?: string
 }) {
-  // 返回模拟数据
-  return Promise.resolve({
-    success: true,
-    message: 'API 测试成功'
+  return apiRequest<{ success: boolean; message: string }>('/api/news/test-api', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(_payload),
   })
 }

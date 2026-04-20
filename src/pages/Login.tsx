@@ -60,7 +60,7 @@ export function Login() {
             <UserPlus className="w-10 h-10 text-white" />
           </div>
           <h1 className="text-2xl font-bold text-gray-900">登录</h1>
-          <p className="text-gray-500 mt-2">登录到您的 AI 新闻创作工具账号</p>
+          <p className="text-gray-500 mt-2">登录到您的 AI 助手账号</p>
         </div>
 
         {error && (

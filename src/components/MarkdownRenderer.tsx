@@ -6,13 +6,15 @@ interface MarkdownRendererProps {
   className?: string
   maxLines?: number
   showFullContent?: boolean
+  onCommandClick?: (command: string) => void
 }
 
 export function MarkdownRenderer({
   content,
   className = '',
   maxLines,
-  showFullContent = false
+  showFullContent = false,
+  onCommandClick,
 }: MarkdownRendererProps) {
   let displayContent = content || ''
   if (maxLines && !showFullContent) {
@@ -51,14 +53,33 @@ export function MarkdownRenderer({
           li: ({ ...props }) => (
             <li className="my-1" {...props} />
           ),
-          a: ({ ...props }) => (
-            <a
-              className="text-blue-600 hover:text-blue-800 underline underline-offset-2"
-              target="_blank"
-              rel="noopener noreferrer"
-              {...props}
-            />
-          ),
+          a: ({ href, children, ...props }) => {
+            if (href?.startsWith('command:')) {
+              const command = decodeURIComponent(href.replace(/^command:/, ''))
+
+              return (
+                <button
+                  type="button"
+                  className="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-sm text-blue-700 transition hover:bg-blue-100"
+                  onClick={() => onCommandClick?.(command)}
+                >
+                  {children}
+                </button>
+              )
+            }
+
+            return (
+              <a
+                className="text-blue-600 hover:text-blue-800 underline underline-offset-2"
+                target="_blank"
+                rel="noopener noreferrer"
+                href={href}
+                {...props}
+              >
+                {children}
+              </a>
+            )
+          },
           code: ({ className, children, ...props }) => {
             const codeClassName = className || ''
             const isInline = !codeClassName.includes('language-') && !codeClassName.includes('hljs')

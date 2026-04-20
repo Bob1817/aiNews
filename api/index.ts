@@ -6,6 +6,7 @@ import { aiRoutes } from './routes/ai'
 import { userRoutes } from './routes/user'
 import { configRoutes } from './routes/config'
 import { categoryRoutes } from './routes/category'
+import { workflowRoutes } from './routes/workflow'
 import { ScheduledService } from './services/ScheduledService'
 
 const app = express()
@@ -21,6 +22,7 @@ app.use('/api/ai', aiRoutes)
 app.use('/api/user', userRoutes)
 app.use('/api/config', configRoutes)
 app.use('/api/categories', categoryRoutes)
+app.use('/api/workflows', workflowRoutes)
 
 // 健康检查
 app.get('/api/health', (_req, res) => {
@@ -57,7 +59,7 @@ new ScheduledService()
 
 // 启动服务器
 app.listen(PORT, () => {
-  console.log('🚀 AI News API 服务器启动成功')
+  console.log('🚀 AI Assistant API 服务器启动成功')
   console.log('=' .repeat(50))
   console.log(`端口: ${PORT}`)
   console.log(`环境: ${env.NODE_ENV}`)
