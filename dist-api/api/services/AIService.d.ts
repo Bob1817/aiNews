@@ -3,6 +3,7 @@ export declare class AIService {
     private configService;
     constructor();
     private callOllamaAPI;
+    private callLlamaCppAPI;
     private callOpenAIAPI;
     private getAIConfig;
     chat(userId: string, message: string, referencedNewsId?: string, _history?: Array<{

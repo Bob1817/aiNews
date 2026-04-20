@@ -15,7 +15,10 @@ export class AIController {
       const response = await this.aiService.chat(userId, message, referencedNewsId, history)
       res.json(response)
     } catch (error) {
-      res.status(500).json({ error: 'AI 对话失败' })
+      console.error('AI 对话错误:', error)
+      res.status(500).json({ 
+        error: error instanceof Error ? error.message : 'AI 对话失败' 
+      })
     }
   }
 
@@ -26,7 +29,10 @@ export class AIController {
       const response = await this.aiService.compose(userId, prompt, referencedNewsIds)
       res.json(response)
     } catch (error) {
-      res.status(500).json({ error: 'AI 创作失败' })
+      console.error('AI 创作错误:', error)
+      res.status(500).json({ 
+        error: error instanceof Error ? error.message : 'AI 创作失败' 
+      })
     }
   }
 }

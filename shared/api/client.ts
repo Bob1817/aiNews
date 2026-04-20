@@ -11,6 +11,7 @@ export interface ApiResponse<T = any> {
 // API 请求配置
 export interface ApiRequestConfig {
   url: string
+  baseUrl?: string
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE'
   headers?: Record<string, string>
   params?: Record<string, string | number | boolean>

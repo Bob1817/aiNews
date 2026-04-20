@@ -50,15 +50,28 @@ export interface UserProfile {
   updatedAt: string
 }
 
+export interface AIModelConfig {
+  id: string
+  name: string
+  provider: 'openai' | 'anthropic' | 'google' | 'ollama' | 'llamacpp'
+  apiKey: string
+  modelName: string
+  baseUrl?: string
+  isActive: boolean
+}
+
 export interface UserConfig {
   id: string
   userId: string
   aiModel: {
-    provider: 'openai' | 'anthropic' | 'google' | 'ollama'
+    id: string
+    name: string
+    provider: 'openai' | 'anthropic' | 'google' | 'ollama' | 'llamacpp'
     apiKey: string
     modelName: string
     baseUrl?: string
   }
+  aiModels: AIModelConfig[]
   newsAPI?: {
     provider: 'newsapi' | 'guardian' | 'nytimes'
     apiKey: string

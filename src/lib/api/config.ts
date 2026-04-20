@@ -10,6 +10,7 @@ export function updateConfig(payload: {
   aiModel: UserConfig['aiModel']
   newsAPI?: UserConfig['newsAPI']
   publishPlatforms: UserConfig['publishPlatforms']
+  aiModels?: UserConfig['aiModels']
 }) {
   return apiRequest<UserConfig>('/api/config', withJsonBody(payload, { method: 'PUT' }))
 }
@@ -34,4 +35,18 @@ export async function getOllamaModels(baseUrl: string) {
   }
 
   return data as { models: Array<{ name: string; model: string }> }
+}
+
+export function switchAIModel(payload: {
+  userId: string
+  modelId: string
+}) {
+  return apiRequest<UserConfig>('/api/config/switch-model', withJsonBody(payload, { method: 'POST' }))
+}
+
+export function deleteAIModel(payload: {
+  userId: string
+  modelId: string
+}) {
+  return apiRequest<UserConfig>('/api/config/delete-model', withJsonBody(payload, { method: 'POST' }))
 }

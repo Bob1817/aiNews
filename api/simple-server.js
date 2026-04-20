@@ -22,11 +22,24 @@ const mockConfig = {
   id: '1',
   userId: '1',
   aiModel: {
+    id: 'default-ollama',
+    name: '默认 Ollama 模型',
     provider: 'ollama',
     apiKey: '',
     modelName: 'gemma4:latest',
     baseUrl: 'http://localhost:11434',
   },
+  aiModels: [
+    {
+      id: 'default-ollama',
+      name: '默认 Ollama 模型',
+      provider: 'ollama',
+      apiKey: '',
+      modelName: 'gemma4:latest',
+      baseUrl: 'http://localhost:11434',
+      isActive: true,
+    },
+  ],
   newsAPI: {
     provider: 'newsapi',
     apiKey: process.env.NEWSAPI_API_KEY || '70803be67f5d4647b6e54a35f0615d25',
@@ -46,6 +59,61 @@ const mockConfig = {
   createdAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
   updatedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
 };
+
+async function testLlamaCppConnection(aiModel) {
+  const baseUrl = (aiModel.baseUrl || 'http://localhost:8080').replace(/\/$/, '');
+  const headers = {
+    'Content-Type': 'application/json',
+  };
+
+  if (aiModel.apiKey) {
+    headers.Authorization = `Bearer ${aiModel.apiKey}`;
+  }
+
+  try {
+    const chatResponse = await fetch(`${baseUrl}/v1/chat/completions`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        model: aiModel.modelName || 'llama.cpp',
+        messages: [{ role: 'user', content: '测试连接，请简短回复。' }],
+        max_tokens: 16,
+      }),
+    });
+
+    if (chatResponse.ok) {
+      return { success: true, message: 'llama.cpp 模型连接成功' };
+    }
+  } catch (error) {
+    console.warn('llama.cpp chat/completions 测试失败，尝试 completion 回退:', error);
+  }
+
+  try {
+    const completionResponse = await fetch(`${baseUrl}/completion`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        prompt: '测试连接，请简短回复。',
+        n_predict: 16,
+        stream: false,
+      }),
+    });
+
+    if (completionResponse.ok) {
+      return { success: true, message: 'llama.cpp 模型连接成功' };
+    }
+
+    return {
+      success: false,
+      message: `llama.cpp 模型连接失败: ${completionResponse.status}`,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: '无法连接到 llama.cpp 模型，请检查服务是否正在运行',
+    };
+  }
+}
 
 // 测试 Ollama 模型连通性
 async function testOllamaConnection() {
@@ -93,10 +161,24 @@ app.get('/api/config', (req, res) => {
 });
 
 app.post('/api/config', (req, res) => {
+  Object.assign(mockConfig, {
+    ...mockConfig,
+    ...req.body,
+    aiModel: req.body.aiModel || mockConfig.aiModel,
+    aiModels: req.body.aiModels || mockConfig.aiModels,
+    updatedAt: new Date().toISOString(),
+  });
   res.json(mockConfig);
 });
 
 app.put('/api/config', (req, res) => {
+  Object.assign(mockConfig, {
+    ...mockConfig,
+    ...req.body,
+    aiModel: req.body.aiModel || mockConfig.aiModel,
+    aiModels: req.body.aiModels || mockConfig.aiModels,
+    updatedAt: new Date().toISOString(),
+  });
   res.json(mockConfig);
 });
 
@@ -115,6 +197,8 @@ app.post('/api/config/test-ai', async (req, res) => {
     if (aiModel.provider === 'ollama') {
       // 测试 Ollama 模型连通性
       testResult = await testOllamaConnection();
+    } else if (aiModel.provider === 'llamacpp') {
+      testResult = await testLlamaCppConnection(aiModel);
     } else if (aiModel.apiKey) {
       // 测试其他 AI 模型连通性
       testResult = { success: true, message: 'AI 模型连接成功' };

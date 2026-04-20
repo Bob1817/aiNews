@@ -102,7 +102,7 @@ export const refreshToken = async (
         role: req.user.role,
       },
       config.security.jwtSecret,
-      { expiresIn: config.security.jwtExpiresIn }
+      { expiresIn: config.security.jwtExpiresIn as any }
     )
 
     // 将新令牌添加到响应头

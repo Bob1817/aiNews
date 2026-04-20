@@ -1,9 +1,4 @@
-import type { User, UserProfile } from '@/types'
 
-interface AuthResponse {
-  user: User
-  profile: UserProfile
-}
 
 export function login(payload: { email: string; password: string }) {
   // 返回模拟数据，让用户可以成功登录

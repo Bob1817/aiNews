@@ -1,6 +1,60 @@
 import { envValidator, env } from './env'
 import fs from 'fs'
 
+// 默认配置对象
+const config = {
+  app: {
+    environment: env.NODE_ENV,
+    version: '1.0.0'
+  },
+  api: {
+    baseUrl: env.API_BASE_URL,
+    timeout: env.API_TIMEOUT,
+    rateLimit: {
+      max: env.RATE_LIMIT_MAX,
+      windowMs: env.RATE_LIMIT_WINDOW_MS
+    }
+  },
+  database: {
+    url: env.DATABASE_URL,
+    maxConnections: env.DB_MAX_CONNECTIONS
+  },
+  security: {
+    jwtSecret: env.JWT_SECRET,
+    jwtExpiresIn: env.JWT_EXPIRES_IN,
+    corsOrigins: env.CORS_ORIGINS.split(',')
+  },
+  logging: {
+    level: env.LOG_LEVEL,
+    format: env.LOG_FORMAT,
+    fileLogging: env.ENABLE_FILE_LOGGING,
+    filePath: env.LOG_FILE_PATH
+  },
+  newsApi: {
+    defaultKeywords: env.NEWS_API_DEFAULT_KEYWORDS.split(','),
+    defaultIndustries: env.NEWS_API_DEFAULT_INDUSTRIES.split(','),
+    timeout: env.NEWS_API_TIMEOUT,
+    maxRetries: env.NEWS_API_MAX_RETRIES
+  },
+  aiService: {
+    defaultModel: env.AI_DEFAULT_MODEL,
+    maxTokens: env.AI_MAX_TOKENS,
+    temperature: env.AI_TEMPERATURE,
+    timeout: env.AI_TIMEOUT
+  },
+  electron: {
+    // Electron 相关配置
+  },
+  isDevelopment: () => env.NODE_ENV === 'development',
+  isProduction: () => env.NODE_ENV === 'production'
+}
+
+// 配置加载器
+const configLoader = {
+  isDevelopment: () => env.NODE_ENV === 'development',
+  isProduction: () => env.NODE_ENV === 'production'
+}
+
 // 配置工具类
 export class ConfigUtils {
   // 初始化配置系统
@@ -168,3 +222,4 @@ export class ConfigUtils {
 
 // 导出单例工具
 export const configUtils = ConfigUtils
+export { config, configLoader }

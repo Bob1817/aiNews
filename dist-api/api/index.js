@@ -4,15 +4,15 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
-const config_1 = require("../shared/config");
+const index_1 = require("../shared/config/index");
 const news_1 = require("./routes/news");
 const ai_1 = require("./routes/ai");
 const user_1 = require("./routes/user");
-const config_2 = require("./routes/config");
+const config_1 = require("./routes/config");
 const category_1 = require("./routes/category");
 const ScheduledService_1 = require("./services/ScheduledService");
 const app = (0, express_1.default)();
-const PORT = config_1.env.PORT;
+const PORT = index_1.env.PORT;
 // 基础中间件
 app.use(express_1.default.json({ limit: '10mb' }));
 app.use(express_1.default.urlencoded({ extended: true, limit: '10mb' }));
@@ -20,7 +20,7 @@ app.use(express_1.default.urlencoded({ extended: true, limit: '10mb' }));
 app.use('/api/news', news_1.newsRoutes);
 app.use('/api/ai', ai_1.aiRoutes);
 app.use('/api/user', user_1.userRoutes);
-app.use('/api/config', config_2.configRoutes);
+app.use('/api/config', config_1.configRoutes);
 app.use('/api/categories', category_1.categoryRoutes);
 // 健康检查
 app.get('/api/health', (_req, res) => {
@@ -28,7 +28,7 @@ app.get('/api/health', (_req, res) => {
         status: 'ok',
         timestamp: new Date().toISOString(),
         version: '1.0.0',
-        environment: config_1.env.NODE_ENV
+        environment: index_1.env.NODE_ENV
     });
 });
 // 404 处理
@@ -41,7 +41,7 @@ app.use('*', (_req, res) => {
     });
 });
 // 错误处理中间件
-app.use((err, req, res, next) => {
+app.use((err, _req, res, _next) => {
     console.error('错误:', err);
     res.status(500).json({
         error: '服务器内部错误',
@@ -56,8 +56,8 @@ app.listen(PORT, () => {
     console.log('🚀 AI News API 服务器启动成功');
     console.log('='.repeat(50));
     console.log(`端口: ${PORT}`);
-    console.log(`环境: ${config_1.env.NODE_ENV}`);
-    console.log(`地址: http://${config_1.env.HOST}:${PORT}`);
+    console.log(`环境: ${index_1.env.NODE_ENV}`);
+    console.log(`地址: http://${index_1.env.HOST}:${PORT}`);
     console.log('='.repeat(50));
 });
 // 处理未捕获的异常

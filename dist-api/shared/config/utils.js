@@ -3,9 +3,63 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.configUtils = exports.ConfigUtils = void 0;
+exports.configLoader = exports.config = exports.configUtils = exports.ConfigUtils = void 0;
 const env_1 = require("./env");
 const fs_1 = __importDefault(require("fs"));
+// 默认配置对象
+const config = {
+    app: {
+        environment: env_1.env.NODE_ENV,
+        version: '1.0.0'
+    },
+    api: {
+        baseUrl: env_1.env.API_BASE_URL,
+        timeout: env_1.env.API_TIMEOUT,
+        rateLimit: {
+            max: env_1.env.RATE_LIMIT_MAX,
+            windowMs: env_1.env.RATE_LIMIT_WINDOW_MS
+        }
+    },
+    database: {
+        url: env_1.env.DATABASE_URL,
+        maxConnections: env_1.env.DB_MAX_CONNECTIONS
+    },
+    security: {
+        jwtSecret: env_1.env.JWT_SECRET,
+        jwtExpiresIn: env_1.env.JWT_EXPIRES_IN,
+        corsOrigins: env_1.env.CORS_ORIGINS.split(',')
+    },
+    logging: {
+        level: env_1.env.LOG_LEVEL,
+        format: env_1.env.LOG_FORMAT,
+        fileLogging: env_1.env.ENABLE_FILE_LOGGING,
+        filePath: env_1.env.LOG_FILE_PATH
+    },
+    newsApi: {
+        defaultKeywords: env_1.env.NEWS_API_DEFAULT_KEYWORDS.split(','),
+        defaultIndustries: env_1.env.NEWS_API_DEFAULT_INDUSTRIES.split(','),
+        timeout: env_1.env.NEWS_API_TIMEOUT,
+        maxRetries: env_1.env.NEWS_API_MAX_RETRIES
+    },
+    aiService: {
+        defaultModel: env_1.env.AI_DEFAULT_MODEL,
+        maxTokens: env_1.env.AI_MAX_TOKENS,
+        temperature: env_1.env.AI_TEMPERATURE,
+        timeout: env_1.env.AI_TIMEOUT
+    },
+    electron: {
+    // Electron 相关配置
+    },
+    isDevelopment: () => env_1.env.NODE_ENV === 'development',
+    isProduction: () => env_1.env.NODE_ENV === 'production'
+};
+exports.config = config;
+// 配置加载器
+const configLoader = {
+    isDevelopment: () => env_1.env.NODE_ENV === 'development',
+    isProduction: () => env_1.env.NODE_ENV === 'production'
+};
+exports.configLoader = configLoader;
 // 配置工具类
 class ConfigUtils {
     // 初始化配置系统

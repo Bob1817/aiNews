@@ -14,7 +14,10 @@ class AIController {
             res.json(response);
         }
         catch (error) {
-            res.status(500).json({ error: 'AI 对话失败' });
+            console.error('AI 对话错误:', error);
+            res.status(500).json({
+                error: error instanceof Error ? error.message : 'AI 对话失败'
+            });
         }
     }
     // AI 新闻创作
@@ -25,7 +28,10 @@ class AIController {
             res.json(response);
         }
         catch (error) {
-            res.status(500).json({ error: 'AI 创作失败' });
+            console.error('AI 创作错误:', error);
+            res.status(500).json({
+                error: error instanceof Error ? error.message : 'AI 创作失败'
+            });
         }
     }
 }

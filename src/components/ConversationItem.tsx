@@ -1,12 +1,14 @@
-import { User, Bot, Quote } from 'lucide-react'
+import { User, Bot, Quote, Save } from 'lucide-react'
 import type { ConversationMessage, NewsArticle } from '@/types'
 
 interface ConversationItemProps {
   message: ConversationMessage
   referencedNews?: NewsArticle | null
+  onSaveToDraft?: (content: string) => void
+  isSaving?: boolean
 }
 
-export function ConversationItem({ message, referencedNews }: ConversationItemProps) {
+export function ConversationItem({ message, referencedNews, onSaveToDraft, isSaving }: ConversationItemProps) {
   const isUser = message.role === 'user'
 
   return (
@@ -63,13 +65,23 @@ export function ConversationItem({ message, referencedNews }: ConversationItemPr
             <div className="px-4 py-3 rounded-2xl bg-white text-gray-900 rounded-tl-md border border-gray-200">
               <p className="whitespace-pre-wrap">{message.content}</p>
             </div>
-            <div className="flex justify-start mt-1 px-1">
+            <div className="flex items-center gap-3 mt-2 px-1">
               <p className="text-xs text-gray-400">
                 {new Date(message.timestamp).toLocaleTimeString('zh-CN', {
                   hour: '2-digit',
                   minute: '2-digit',
                 })}
               </p>
+              {onSaveToDraft && (
+                <button
+                  onClick={() => onSaveToDraft(message.content)}
+                  disabled={isSaving}
+                  className="flex items-center gap-1 px-3 py-1 text-xs text-blue-600 bg-blue-50 rounded-lg hover:bg-blue-100 disabled:opacity-50 transition-colors"
+                >
+                  <Save className="w-3 h-3" />
+                  {isSaving ? '保存中...' : '保存到草稿'}
+                </button>
+              )}
             </div>
           </div>
         </div>

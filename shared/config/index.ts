@@ -5,11 +5,12 @@ export * from './utils'
 
 // 重新导出常用功能
 import { env } from './env'
-import { configUtils } from './utils'
+import { configUtils, config } from './utils'
 
 export {
   env,
-  configUtils
+  configUtils,
+  config
 }
 
 // 默认导出配置工具

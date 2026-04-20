@@ -1,6 +1,6 @@
 import express from 'express'
-import { env } from '../shared/config'
-import middleware from './middleware'
+import { env } from '../shared/config/index'
+
 import { newsRoutes } from './routes/news'
 import { aiRoutes } from './routes/ai'
 import { userRoutes } from './routes/user'
@@ -43,7 +43,7 @@ app.use('*', (_req, res) => {
 })
 
 // 错误处理中间件
-app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error('错误:', err)
   res.status(500).json({
     error: '服务器内部错误',

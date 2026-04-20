@@ -17,9 +17,7 @@ export async function chat(payload: {
     return response
   } catch (error) {
     console.error('chat 函数调用失败:', error)
-    // API 调用失败时使用模拟响应
-    return {
-      content: `您好！我是 AI 助手。您刚刚说："${payload.message}"。\n\n这是一个模拟回复，因为无法连接到 AI 服务。\n\n您可以尝试以下操作：\n1. 检查 Ollama 服务是否正在运行\n2. 检查网络连接是否正常\n3. 稍后再试`
-    }
+    // 直接抛出错误，不使用模拟响应
+    throw error
   }
 }

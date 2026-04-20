@@ -125,6 +125,8 @@ export function getDefaultConfigForm(): {
 } {
   return {
     aiModel: {
+      id: 'default',
+      name: '默认模型',
       provider: 'openai',
       apiKey: '',
       modelName: 'gpt-3.5-turbo',
@@ -152,6 +154,8 @@ export function getDefaultConfigForm(): {
 export function getMockConfigForm() {
   return {
     aiModel: {
+      id: 'default',
+      name: '默认模型',
       provider: 'openai' as const,
       apiKey: 'sk-...',
       modelName: 'gpt-3.5-turbo',

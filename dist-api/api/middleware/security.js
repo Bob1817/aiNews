@@ -85,7 +85,7 @@ const validateInput = (validations) => {
         }
         res.status(400).json({
             error: '输入验证失败',
-            details: errors.array().map(err => ({
+            details: errors.array().map((err) => ({
                 field: err.type === 'field' ? err.path : 'unknown',
                 message: err.msg,
                 value: err.value,

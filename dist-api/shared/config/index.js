@@ -14,7 +14,7 @@ var __exportStar = (this && this.__exportStar) || function(m, exports) {
     for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.configUtils = exports.env = void 0;
+exports.config = exports.configUtils = exports.env = void 0;
 // 配置系统主入口
 __exportStar(require("./types"), exports);
 __exportStar(require("./env"), exports);
@@ -24,6 +24,7 @@ const env_1 = require("./env");
 Object.defineProperty(exports, "env", { enumerable: true, get: function () { return env_1.env; } });
 const utils_1 = require("./utils");
 Object.defineProperty(exports, "configUtils", { enumerable: true, get: function () { return utils_1.configUtils; } });
+Object.defineProperty(exports, "config", { enumerable: true, get: function () { return utils_1.config; } });
 // 默认导出配置工具
 exports.default = utils_1.configUtils;
 //# sourceMappingURL=index.js.map

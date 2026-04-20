@@ -1,19 +1,25 @@
 import { useState, useRef, useEffect } from 'react'
-import { Send, RefreshCw, ChevronLeft, ChevronRight, Bot } from 'lucide-react'
+import { Send, RefreshCw, ChevronLeft, ChevronRight, Bot, Server, Settings } from 'lucide-react'
 import { NewsCard } from '@/components/NewsCard'
 import { ConversationItem } from '@/components/ConversationItem'
 import { useToast } from '@/lib/toast'
 import { useAppStore } from '@/store'
-import type { NewsArticle, ConversationMessage } from '@/types'
+import type { NewsArticle, ConversationMessage, SavedNews } from '@/types'
 import { chat as chatWithAi } from '@/lib/api/chat'
 import { getErrorMessage } from '@/lib/errors'
-import { getRecentNews } from '@/lib/api/news'
-import { getMockChatResponse, getMockNewsArticles } from '@/lib/fallbacks'
+import { getRecentNews, createSavedNews } from '@/lib/api/news'
+import { getConfig } from '@/lib/api/config'
+import { getMockNewsArticles } from '@/lib/fallbacks'
+import { Link, useLocation } from 'react-router-dom'
 
 export function Chat() {
+  const location = useLocation()
   const [inputMessage, setInputMessage] = useState('')
   const [currentPage, setCurrentPage] = useState(0)
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const [hasAiModelConfig, setHasAiModelConfig] = useState(true)
+  const [isCheckingConfig, setIsCheckingConfig] = useState(true)
+  const [isSavingToDraft, setIsSavingToDraft] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const newsContainerRef = useRef<HTMLDivElement>(null)
   const { showToast } = useToast()
@@ -22,10 +28,12 @@ export function Chat() {
     conversationMessages,
     selectedNews,
     isLoading,
+    savedNews,
     setNewsArticles,
     addConversationMessage,
     setSelectedNews,
     setIsLoading,
+    setSavedNews,
   } = useAppStore()
 
   const scrollToBottom = () => {
@@ -35,6 +43,30 @@ export function Chat() {
   useEffect(() => {
     scrollToBottom()
   }, [conversationMessages])
+
+  // 检查 AI 模型配置
+  useEffect(() => {
+    const checkAiModelConfig = async () => {
+      try {
+        setIsCheckingConfig(true)
+        const config = await getConfig('1')
+        console.log('AI 模型配置检查结果:', config)
+        // 检查是否有有效的 AI 模型配置
+        // 对于 llama.cpp 和 ollama 模型，modelName 不是必需的
+        const hasValidConfig = !!(config.aiModel.id && config.aiModel.name && 
+          (config.aiModel.modelName || ['llamacpp', 'ollama'].includes(config.aiModel.provider)))
+        console.log('是否有有效配置:', hasValidConfig)
+        setHasAiModelConfig(hasValidConfig)
+      } catch (error) {
+        console.error('检查 AI 模型配置失败:', error)
+        setHasAiModelConfig(false)
+      } finally {
+        setIsCheckingConfig(false)
+      }
+    }
+
+    checkAiModelConfig()
+  }, [location.pathname])
 
   // 获取新闻
   const fetchNews = async (showLoading = true) => {
@@ -129,11 +161,10 @@ export function Chat() {
       addConversationMessage(aiMessage)
     } catch (error) {
       console.error('AI 对话失败:', error)
-      addConversationMessage(getMockChatResponse(selectedNews))
       showToast({
         title: 'AI 服务暂时不可用',
-        message: `${getErrorMessage(error, '请求失败')}，已为你切换到本地演示回复。`,
-        variant: 'info',
+        message: `${getErrorMessage(error, '请求失败')}，请检查 AI 模型配置和服务状态。`,
+        variant: 'error',
       })
     } finally {
       setIsLoading(false)
@@ -145,6 +176,58 @@ export function Chat() {
   const handleRefreshNews = async () => {
     setIsRefreshing(true)
     await fetchNews(false)
+  }
+
+  // 保存到草稿
+  const handleSaveToDraft = async (content: string) => {
+    setIsSavingToDraft(true)
+    try {
+      // 从内容中提取标题（第一行）
+      const lines = content.trim().split('\n')
+      let title = 'AI 创作的新闻'
+      let actualContent = content
+
+      if (lines.length > 0) {
+        // 尝试提取标题（通常第一行或带 # 标记的行）
+        const firstLine = lines[0].trim()
+        if (firstLine.startsWith('#')) {
+          title = firstLine.replace(/^#+\s*/, '').trim()
+          actualContent = lines.slice(1).join('\n').trim()
+        } else if (firstLine.length > 0 && firstLine.length <= 100) {
+          title = firstLine
+          actualContent = lines.slice(1).join('\n').trim()
+          // 如果剩下的内容太少，可能第一行不是标题
+          if (actualContent.length < 50) {
+            title = 'AI 创作的新闻'
+            actualContent = content
+          }
+        }
+      }
+
+      const data = await createSavedNews({
+        userId: '1',
+        title,
+        content: actualContent || content,
+        categories: [],
+        industries: [],
+      })
+
+      setSavedNews([data.data as SavedNews, ...savedNews])
+      showToast({
+        title: '保存成功',
+        message: '新闻已保存到草稿箱',
+        variant: 'success',
+      })
+    } catch (error) {
+      console.error('保存到草稿失败:', error)
+      showToast({
+        title: '保存失败',
+        message: getErrorMessage(error, '请稍后重试'),
+        variant: 'error',
+      })
+    } finally {
+      setIsSavingToDraft(false)
+    }
   }
 
   // 左右滑动导航
@@ -173,6 +256,55 @@ export function Chat() {
   const endIndex = startIndex + itemsPerPage
   const currentNews = newsArticles.slice(startIndex, endIndex)
   const totalPages = Math.ceil(newsArticles.length / itemsPerPage)
+
+  if (isCheckingConfig) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full">
+        <div className="w-16 h-16 border-4 border-gray-200 border-t-4 border-anthropic-orange rounded-full animate-spin mb-4"></div>
+        <p className="text-gray-600">加载中...</p>
+      </div>
+    )
+  }
+
+  if (!hasAiModelConfig) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full bg-gray-50 px-6">
+        <div className="w-24 h-24 bg-purple-100 rounded-2xl flex items-center justify-center mb-6">
+          <Server className="w-12 h-12 text-purple-600" />
+        </div>
+        <h2 className="text-2xl font-semibold text-gray-900 mb-4">未配置 AI 模型</h2>
+        <p className="text-gray-600 text-center max-w-md mb-8">
+          首次使用前需要配置 AI 模型。请选择以下方式之一进行配置：
+        </p>
+        <div className="space-y-4 w-full max-w-md">
+          <Link
+            to="/config"
+            className="flex items-center justify-center gap-3 px-6 py-3 bg-anthropic-orange text-white rounded-xl hover:bg-anthropic-dark transition-colors"
+          >
+            <Settings className="w-5 h-5" />
+            前往配置页面
+          </Link>
+          <div className="p-4 bg-white rounded-xl border border-gray-200">
+            <h3 className="font-medium text-gray-900 mb-2">支持的 AI 模型</h3>
+            <ul className="space-y-2 text-sm text-gray-600">
+              <li className="flex items-center gap-2">
+                <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                <span>OpenAI (GPT 系列)</span>
+              </li>
+              <li className="flex items-center gap-2">
+                <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                <span>Ollama (本地模型)</span>
+              </li>
+              <li className="flex items-center gap-2">
+                <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                <span>llama.cpp (本地模型)</span>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="flex flex-col h-full">
@@ -279,6 +411,8 @@ export function Chat() {
                     ? newsArticles.find((n) => n.id === message.referencedNewsId)
                     : null
                 }
+                onSaveToDraft={message.role === 'assistant' ? handleSaveToDraft : undefined}
+                isSaving={isSavingToDraft}
               />
             ))}
             {isLoading && (

@@ -2,7 +2,7 @@ import { NewsService } from './NewsService'
 import { ConfigService } from './ConfigService'
 
 interface AIConfig {
-  provider: 'openai' | 'anthropic' | 'google' | 'ollama'
+  provider: 'openai' | 'anthropic' | 'google' | 'ollama' | 'llamacpp'
   apiKey: string
   modelName: string
   baseUrl?: string
@@ -43,6 +43,65 @@ export class AIService {
     } catch (error) {
       console.error('Ollama API 调用错误:', error)
       throw new Error('调用 Ollama API 失败，请检查 Ollama 是否正在运行')
+    }
+  }
+
+  // 调用 llama.cpp API
+  private async callLlamaCppAPI(config: AIConfig, prompt: string, systemPrompt?: string): Promise<string> {
+    const baseUrl = config.baseUrl || 'http://localhost:8080'
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    }
+
+    if (config.apiKey) {
+      headers.Authorization = `Bearer ${config.apiKey}`
+    }
+
+    try {
+      // 首先尝试 v1/chat/completions 端点（兼容 OpenAI API 格式）
+      const chatResponse = await fetch(`${baseUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          model: config.modelName || 'llama.cpp',
+          messages: [
+            ...(systemPrompt ? [{ role: 'system', content: systemPrompt }] : []),
+            { role: 'user', content: prompt }
+          ],
+          max_tokens: 1000,
+          stream: false,
+        }),
+      })
+
+      if (chatResponse.ok) {
+        const data = await chatResponse.json() as { choices?: Array<{ message?: { content?: string } }> }
+        return data.choices?.[0]?.message?.content || '抱歉，未能生成回复。'
+      }
+    } catch (error) {
+      console.warn('llama.cpp chat/completions 测试失败，尝试 completion 回退:', error)
+    }
+
+    try {
+      // 尝试 completion 端点
+      const completionResponse = await fetch(`${baseUrl}/completion`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          prompt: systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt,
+          n_predict: 1000,
+          stream: false,
+        }),
+      })
+
+      if (completionResponse.ok) {
+        const data = await completionResponse.json() as { content?: string }
+        return data.content || '抱歉，未能生成回复。'
+      }
+
+      throw new Error(`llama.cpp API 调用失败: ${completionResponse.status}`)
+    } catch (error) {
+      console.error('llama.cpp API 调用错误:', error)
+      throw new Error('调用 llama.cpp API 失败，请检查 llama.cpp 服务是否正在运行')
     }
   }
 
@@ -108,7 +167,7 @@ export class AIService {
     userId: string,
     message: string,
     referencedNewsId?: string,
-    _history?: Array<{ role: 'user' | 'assistant'; content: string }>
+    history?: Array<{ role: 'user' | 'assistant'; content: string }>
   ): Promise<{ content: string }> {
     let fullPrompt = message
 
@@ -119,40 +178,38 @@ export class AIService {
       }
     }
 
-    const systemPrompt = '你是一个专业的新闻创作助手，擅长基于新闻内容进行二次创作，生成专业、准确的新闻稿件。'
+    // 不使用系统提示，直接传递用户的原话
 
     try {
       const config = await this.getAIConfig(userId)
       let response: string
 
-      console.log('AI 配置:', { provider: config.provider, hasApiKey: !!config.apiKey, modelName: config.modelName })
+      console.log('AI 配置:', { 
+        provider: config.provider, 
+        hasApiKey: !!config.apiKey, 
+        modelName: config.modelName,
+        baseUrl: config.baseUrl 
+      })
 
       if (config.provider === 'ollama') {
         console.log('使用 Ollama API')
-        response = await this.callOllamaAPI(config, fullPrompt, systemPrompt)
+        response = await this.callOllamaAPI(config, fullPrompt)
+      } else if (config.provider === 'llamacpp') {
+        console.log('使用 llama.cpp API')
+        console.log('llama.cpp 配置:', { baseUrl: config.baseUrl || 'http://localhost:8080' })
+        response = await this.callLlamaCppAPI(config, fullPrompt)
       } else if (config.provider === 'openai' && config.apiKey && config.apiKey !== 'sk-...') {
         console.log('使用 OpenAI API')
-        response = await this.callOpenAIAPI(config, fullPrompt, systemPrompt)
+        response = await this.callOpenAIAPI(config, fullPrompt)
       } else {
-        console.log('没有有效配置，使用模拟响应')
-        // 如果没有配置API Key或使用其他提供商，使用模拟响应
-        throw new Error('使用模拟响应')
+        console.log('没有有效配置')
+        throw new Error('没有有效的 AI 模型配置')
       }
 
       return { content: response }
     } catch (error) {
       console.error('AI 对话调用失败:', error)
-      // API调用失败时使用模拟响应
-      let response = ''
-      if (referencedNewsId) {
-        const news = await this.newsService.getNewsById(referencedNewsId)
-        if (news) {
-          response = `基于您引用的新闻"${news.title}"，我为您创作了一篇新闻稿...\n\n这是一篇关于${news.relatedKeywords.join('、')}的深度报道，详细分析了该领域的最新发展趋势和未来展望。文章从多个角度探讨了相关技术的应用场景和潜在影响，为读者提供了全面的行业洞察。`
-        }
-      } else {
-        response = '您好！我是 AI 新闻助手。您可以从上方选择新闻引用，然后让我帮您进行二次创作。我可以基于最新的新闻内容，为您生成专业、准确的新闻稿件。'
-      }
-      return { content: response }
+      throw error
     }
   }
 
@@ -177,7 +234,7 @@ export class AIService {
       }
     }
 
-    const systemPrompt = '你是一个专业的新闻创作者，擅长撰写深度报道和分析文章。请确保文章结构清晰、观点准确、内容丰富。'
+    // 不使用系统提示，直接传递用户的原话
 
     try {
       const config = await this.getAIConfig(userId)
@@ -187,13 +244,16 @@ export class AIService {
 
       if (config.provider === 'ollama') {
         console.log('使用 Ollama API 进行创作')
-        response = await this.callOllamaAPI(config, fullPrompt, systemPrompt)
+        response = await this.callOllamaAPI(config, fullPrompt)
+      } else if (config.provider === 'llamacpp') {
+        console.log('使用 llama.cpp API 进行创作')
+        response = await this.callLlamaCppAPI(config, fullPrompt)
       } else if (config.provider === 'openai' && config.apiKey && config.apiKey !== 'sk-...') {
         console.log('使用 OpenAI API 进行创作')
-        response = await this.callOpenAIAPI(config, fullPrompt, systemPrompt)
+        response = await this.callOpenAIAPI(config, fullPrompt)
       } else {
-        console.log('没有有效配置，使用模拟响应进行创作')
-        throw new Error('使用模拟响应')
+        console.log('没有有效配置')
+        throw new Error('没有有效的 AI 模型配置')
       }
 
       // 尝试从响应中提取标题
@@ -203,11 +263,7 @@ export class AIService {
       return { title, content: response }
     } catch (error) {
       console.error('AI 创作调用失败:', error)
-      // API调用失败时使用模拟响应
-      const title = `AI 创作：${prompt}`
-      const content = `# ${title}\n\n${prompt}\n\n${referencedContent ? `## 参考信息\n\n${referencedContent}` : ''}\n\n本文由 AI 基于最新新闻内容创作，提供了对相关话题的深度分析和见解。`
-
-      return { title, content }
+      throw error
     }
   }
 }

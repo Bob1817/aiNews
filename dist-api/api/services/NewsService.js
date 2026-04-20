@@ -51,15 +51,17 @@ class NewsService {
             const crawlResult = await this.aiCrawlerService.crawlNews(userProfile, userId);
             if (crawlResult.success && crawlResult.articles.length > 0) {
                 NewsService.newsArticles = crawlResult.articles;
-                // 随机返回6条新闻
-                return this.aiCrawlerService.getRandomNews(6);
             }
         }
         catch (error) {
             console.error('爬虫获取新闻失败，使用模拟数据:', error);
         }
-        // 模拟根据用户兴趣过滤新闻
-        return NewsService.newsArticles;
+        // 如果没有新闻，确保返回初始化的模拟数据
+        if (NewsService.newsArticles.length === 0) {
+            this.initializeMockData();
+        }
+        // 返回所有新闻，或者最多6条
+        return NewsService.newsArticles.slice(0, 6);
     }
     // 更新新闻源
     async updateNewsFeeds(userId, userProfile) {
