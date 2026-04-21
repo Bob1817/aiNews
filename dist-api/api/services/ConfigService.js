@@ -1,7 +1,27 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ConfigService = void 0;
+const promises_1 = require("node:fs/promises");
+const node_os_1 = require("node:os");
+const node_path_1 = __importDefault(require("node:path"));
 class ConfigService {
+    getDefaultWorkspaceRoot() {
+        return node_path_1.default.join((0, node_os_1.homedir)(), 'Documents', 'AI助手工作台');
+    }
+    normalizeWorkspace(workspace) {
+        return {
+            rootPath: workspace?.rootPath?.trim() || this.getDefaultWorkspaceRoot(),
+            allowAiAccess: workspace?.allowAiAccess ?? true,
+        };
+    }
+    async ensureWorkspaceStructure(rootPath) {
+        await (0, promises_1.mkdir)(rootPath, { recursive: true });
+        await (0, promises_1.mkdir)(node_path_1.default.join(rootPath, 'uploads'), { recursive: true });
+        await (0, promises_1.mkdir)(node_path_1.default.join(rootPath, 'generated'), { recursive: true });
+    }
     constructor() {
         // 初始化一些模拟数据
         if (ConfigService.userConfigs.length === 0) {
@@ -15,18 +35,13 @@ class ConfigService {
                 userId: '1',
                 aiModel: {
                     id: '',
-                    name: '',
+                    name: 'Ollama Gemma4',
                     provider: 'ollama',
                     apiKey: '',
-                    modelName: '',
-                    baseUrl: '',
+                    modelName: process.env.OLLAMA_MODEL || 'gemma4:latest',
+                    baseUrl: process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
                 },
                 aiModels: [],
-                newsAPI: {
-                    provider: 'newsapi',
-                    apiKey: process.env.NEWSAPI_API_KEY || '70803be67f5d4647b6e54a35f0615d25',
-                    baseUrl: 'https://newsapi.org/v2',
-                },
                 publishPlatforms: {
                     website: {
                         apiUrl: 'https://api.example.com/news',
@@ -38,6 +53,7 @@ class ConfigService {
                         token: 'token_123',
                     },
                 },
+                workspace: this.normalizeWorkspace(),
                 createdAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
                 updatedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
             },
@@ -47,15 +63,6 @@ class ConfigService {
     async getConfig(userId) {
         const config = ConfigService.userConfigs.find((c) => c.userId === userId);
         if (config) {
-            // 确保有默认的 NewsAPI 配置
-            if (!config.newsAPI) {
-                config.newsAPI = {
-                    provider: 'newsapi',
-                    apiKey: process.env.NEWSAPI_API_KEY || '70803be67f5d4647b6e54a35f0615d25',
-                    baseUrl: 'https://newsapi.org/v2',
-                };
-                config.updatedAt = new Date().toISOString();
-            }
             // 确保 aiModel 对象存在
             if (!config.aiModel) {
                 config.aiModel = {
@@ -73,9 +80,17 @@ class ConfigService {
                 config.aiModels = [];
                 config.updatedAt = new Date().toISOString();
             }
+            if (!config.workspace) {
+                config.workspace = this.normalizeWorkspace();
+                config.updatedAt = new Date().toISOString();
+            }
+            else {
+                config.workspace = this.normalizeWorkspace(config.workspace);
+            }
+            await this.ensureWorkspaceStructure(config.workspace.rootPath);
             return config;
         }
-        // 如果配置不存在，创建一个新的（包含默认的 NewsAPI 配置）
+        // 如果配置不存在，创建一个新的默认配置
         const newConfig = {
             id: Date.now().toString(),
             userId,
@@ -88,15 +103,12 @@ class ConfigService {
                 baseUrl: '',
             },
             aiModels: [],
-            newsAPI: {
-                provider: 'newsapi',
-                apiKey: process.env.NEWSAPI_API_KEY || '70803be67f5d4647b6e54a35f0615d25',
-                baseUrl: 'https://newsapi.org/v2',
-            },
             publishPlatforms: {},
+            workspace: this.normalizeWorkspace(),
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
         };
+        await this.ensureWorkspaceStructure(newConfig.workspace.rootPath);
         ConfigService.userConfigs.push(newConfig);
         return newConfig;
     }
@@ -109,11 +121,15 @@ class ConfigService {
         if (configData.aiModel) {
             config.aiModel = { ...config.aiModel, ...configData.aiModel };
         }
-        if (configData.newsAPI) {
-            config.newsAPI = { ...config.newsAPI, ...configData.newsAPI };
-        }
         if (configData.publishPlatforms) {
             config.publishPlatforms = { ...config.publishPlatforms, ...configData.publishPlatforms };
+        }
+        if (configData.workspace) {
+            config.workspace = this.normalizeWorkspace({
+                ...config.workspace,
+                ...configData.workspace,
+            });
+            await this.ensureWorkspaceStructure(config.workspace.rootPath);
         }
         if (configData.aiModels) {
             // 检查是否是第一次保存模型
@@ -134,6 +150,9 @@ class ConfigService {
                 modelName: activeModel.modelName,
                 baseUrl: activeModel.baseUrl,
             };
+        }
+        if (!config.workspace) {
+            config.workspace = this.normalizeWorkspace();
         }
         config.updatedAt = new Date().toISOString();
         return config;

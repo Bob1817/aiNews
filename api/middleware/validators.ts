@@ -235,23 +235,6 @@ export const aiConfigValidators = {
   ],
 }
 
-// 新闻 API 配置验证规则
-export const newsApiConfigValidators = {
-  update: [
-    body('provider')
-      .isIn(['newsapi', 'guardian', 'nytimes'])
-      .withMessage('新闻API提供商必须是 newsapi、guardian 或 nytimes'),
-    body('apiKey')
-      .optional()
-      .isLength({ min: 10 })
-      .withMessage('API密钥至少需要10个字符'),
-    body('baseUrl')
-      .optional()
-      .isURL()
-      .withMessage('请输入有效的URL'),
-  ],
-}
-
 // 聊天验证规则
 export const chatValidators = {
   sendMessage: [
@@ -311,7 +294,6 @@ export const validators = {
   savedNews: savedNewsValidators,
   category: categoryValidators,
   aiConfig: aiConfigValidators,
-  newsApiConfig: newsApiConfigValidators,
   chat: chatValidators,
   common: commonValidators,
 }

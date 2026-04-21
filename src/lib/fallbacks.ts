@@ -113,7 +113,6 @@ export function getDefaultInterests() {
 
 export function getDefaultConfigForm(): {
   aiModel: Required<UserConfig['aiModel']>
-  newsAPI?: UserConfig['newsAPI']
   publishPlatforms: {
     website: {
       apiUrl: string
@@ -134,11 +133,6 @@ export function getDefaultConfigForm(): {
       provider: 'openai',
       apiKey: '',
       modelName: 'gpt-3.5-turbo',
-      baseUrl: '',
-    },
-    newsAPI: {
-      provider: 'newsapi',
-      apiKey: '',
       baseUrl: '',
     },
     publishPlatforms: {
@@ -167,11 +161,6 @@ export function getMockConfigForm() {
       provider: 'openai' as const,
       apiKey: 'sk-...',
       modelName: 'gpt-3.5-turbo',
-      baseUrl: '',
-    },
-    newsAPI: {
-      provider: 'newsapi' as const,
-      apiKey: '',
       baseUrl: '',
     },
     publishPlatforms: {

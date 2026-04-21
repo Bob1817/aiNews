@@ -1,4 +1,6 @@
 import { Request, Response } from 'express'
+import { mkdir, writeFile } from 'node:fs/promises'
+import path from 'node:path'
 import { ConfigService } from '../services/ConfigService'
 
 export class ConfigController {
@@ -6,6 +8,18 @@ export class ConfigController {
 
   constructor() {
     this.configService = new ConfigService()
+  }
+
+  private sanitizeFileName(fileName: string) {
+    const ext = path.extname(fileName)
+    const baseName = path.basename(fileName, ext)
+    const safeBaseName =
+      baseName.replace(/[<>:"/\\|?*\u0000-\u001F]/g, '_').replace(/\s+/g, ' ').trim() || 'workspace-file'
+
+    return {
+      ext: ext || '',
+      safeBaseName,
+    }
   }
 
   private async resolveOllamaModelName(aiModel: {
@@ -340,10 +354,55 @@ export class ConfigController {
     }
   }
 
+  async uploadWorkspaceAsset(req: Request, res: Response) {
+    try {
+      const { userId, fileName, contentBase64, mimeType } = req.body as {
+        userId?: string
+        fileName?: string
+        contentBase64?: string
+        mimeType?: string
+      }
+
+      if (!userId || !fileName || !contentBase64) {
+        return res.status(400).json({
+          error: '参数错误',
+          message: '请提供 userId、fileName 和 contentBase64',
+        })
+      }
+
+      const config = await this.configService.getConfig(userId)
+      const uploadsDir = path.join(config.workspace.rootPath, 'uploads')
+      await mkdir(uploadsDir, { recursive: true })
+
+      const { ext, safeBaseName } = this.sanitizeFileName(fileName)
+      const savedFileName = `${safeBaseName}-${Date.now()}${ext}`
+      const savedFilePath = path.join(uploadsDir, savedFileName)
+
+      await writeFile(savedFilePath, Buffer.from(contentBase64, 'base64'))
+
+      return res.json({
+        success: true,
+        message: '文件上传成功',
+        data: {
+          fileName: savedFileName,
+          filePath: savedFilePath,
+          relativePath: `uploads/${savedFileName}`,
+          mimeType: mimeType || 'application/octet-stream',
+        },
+      })
+    } catch (error) {
+      console.error('上传工作文件失败:', error)
+      return res.status(500).json({
+        error: '上传工作文件失败',
+        message: error instanceof Error ? error.message : '未知错误',
+      })
+    }
+  }
+
   // 保存配置
   async saveConfig(req: Request, res: Response) {
     try {
-      const { userId, aiModel, newsAPI, publishPlatforms, aiModels } = req.body
+      const { userId, aiModel, publishPlatforms, aiModels, workspace } = req.body
 
       // 仅在用户实际配置了 AI 模型时才校验，避免保存其他设置被空白模型配置阻塞
       if (aiModel && this.hasConfiguredAIModel(aiModel)) {
@@ -382,9 +441,9 @@ export class ConfigController {
       // 保存配置
       const savedConfig = await this.configService.saveConfig(userId, {
         aiModel,
-        newsAPI,
         publishPlatforms,
         aiModels,
+        workspace,
       })
 
       res.json(savedConfig)

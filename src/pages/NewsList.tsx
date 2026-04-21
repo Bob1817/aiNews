@@ -21,29 +21,22 @@ import ReactMarkdown from 'react-markdown'
 import { useAppStore } from '@/store'
 import type { NewsCategory, SavedNews } from '@/types'
 import { getCategories } from '@/lib/api/categories'
-import { deleteNews, getSavedNews } from '@/lib/api/news'
+import { deleteNews, downloadSavedFile, getSavedNews } from '@/lib/api/news'
 import { getDefaultCategories, getMockSavedNews } from '@/lib/fallbacks'
 
 type SavedNewsWithIndustries = SavedNews & { industries?: string[] }
 
-const industries = ['科技', '医疗', '汽车', '新能源', '云计算']
-
 function SummaryCard({
   label,
   value,
-  hint,
 }: {
   label: string
   value: string
-  hint: string
 }) {
   return (
-    <div className="rounded-[28px] border border-slate-200 bg-white px-5 py-4 shadow-[0_20px_60px_rgba(15,23,42,0.05)]">
-      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
-        {label}
-      </p>
-      <p className="mt-3 text-2xl font-semibold text-slate-900">{value}</p>
-      <p className="mt-1 text-sm text-slate-500">{hint}</p>
+    <div className="flex min-h-[112px] flex-col items-center justify-center rounded-[24px] border border-slate-200 bg-white px-5 py-4 text-center shadow-[0_14px_32px_rgba(15,23,42,0.05)]">
+      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">{label}</p>
+      <p className="mt-3 text-3xl font-semibold text-slate-900">{value}</p>
     </div>
   )
 }
@@ -75,7 +68,7 @@ export function NewsList() {
   const { savedNews, setSavedNews } = useAppStore()
   const [filter, setFilter] = useState<'all' | 'published' | 'draft'>('all')
   const [searchKeyword, setSearchKeyword] = useState('')
-  const [industryFilter, setIndustryFilter] = useState('all')
+  const [typeFilter, setTypeFilter] = useState<'all' | 'news' | 'file'>('all')
   const [sortBy, setSortBy] = useState<'updatedAt' | 'createdAt' | 'title'>('updatedAt')
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
   const [categories, setCategories] = useState<NewsCategory[]>([])
@@ -114,6 +107,12 @@ export function NewsList() {
   }
 
   const getTaskType = (news: SavedNews) => {
+    if (news.outputType === 'file') {
+      return { icon: FileText, label: '文件' }
+    }
+    if (news.outputType === 'news') {
+      return { icon: MessageSquare, label: '新闻' }
+    }
     if (news.content.includes('工作流') || news.content.includes('workflow')) {
       return { icon: Workflow, label: '工作流结果' }
     }
@@ -241,8 +240,9 @@ export function NewsList() {
           if (!titleMatch && !contentMatch) return false
         }
 
-        if (industryFilter !== 'all') {
-          return news.industries?.includes(industryFilter) || false
+        const outputType = news.outputType || 'news'
+        if (typeFilter !== 'all' && outputType !== typeFilter) {
+          return false
         }
 
         return true
@@ -258,11 +258,11 @@ export function NewsList() {
 
         return sortOrder === 'asc' ? comparison : -comparison
       })
-  }, [filter, industryFilter, savedNews, searchKeyword, sortBy, sortOrder])
+  }, [filter, typeFilter, savedNews, searchKeyword, sortBy, sortOrder])
 
   const publishedCount = savedNews.filter((item) => item.isPublished).length
   const draftCount = savedNews.length - publishedCount
-  const activeCategories = new Set(savedNews.flatMap((item) => item.categories ?? [])).size
+  const fileCount = savedNews.filter((item) => item.outputType === 'file').length
 
   const handleDelete = async () => {
     if (!deleteId) return
@@ -281,31 +281,26 @@ export function NewsList() {
   }
 
   return (
-    <div className="h-full overflow-y-auto bg-[linear-gradient(180deg,#f8fafc_0%,#eef2ff_100%)]">
+    <div className="h-full overflow-y-auto bg-transparent">
       <div className="mx-auto flex min-h-full w-full max-w-[1600px] flex-col gap-6 px-6 py-6 lg:px-10">
-        <section className="rounded-[32px] border border-slate-200 bg-white/95 p-8 shadow-[0_30px_80px_rgba(15,23,42,0.08)]">
-          <div className="flex flex-col gap-8 xl:flex-row xl:items-end xl:justify-between">
-            <div className="max-w-3xl">
-              <p className="text-xs font-semibold uppercase tracking-[0.28em] text-sky-600">
-                Task Results
-              </p>
-              <h1 className="mt-3 font-display text-3xl text-slate-900 md:text-4xl">
-                任务结果管理台
-              </h1>
-              <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600 md:text-base">
-                集中查看 AI 助手沉淀的工作结果、已发布内容和草稿文档。这里作为内容整理区存在，负责筛选、回看和继续处理产出。
+        <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_16px_36px_rgba(15,23,42,0.06)]">
+          <div className="flex flex-col gap-8 xl:flex-row xl:items-center xl:justify-between">
+            <div className="max-w-2xl self-center">
+              <h1 className="text-2xl font-semibold text-slate-900 md:text-3xl">任务结果</h1>
+              <p className="mt-2 text-sm text-slate-600">
+                查看、筛选和继续处理任务产出。
               </p>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-3 xl:min-w-[520px]">
-              <SummaryCard label="结果总数" value={String(savedNews.length)} hint="全部任务输出与文稿" />
-              <SummaryCard label="已发布" value={String(publishedCount)} hint="已推送到对外渠道" />
-              <SummaryCard label="分类覆盖" value={String(activeCategories)} hint="已使用的内容分类" />
+              <SummaryCard label="结果总数" value={String(savedNews.length)} />
+              <SummaryCard label="已发布" value={String(publishedCount)} />
+              <SummaryCard label="文件数量" value={String(fileCount)} />
             </div>
           </div>
         </section>
 
-        <section className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-[0_24px_60px_rgba(15,23,42,0.06)]">
+        <section className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-[0_16px_36px_rgba(15,23,42,0.05)]">
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1.4fr)_220px_220px]">
             <label className="relative">
               <span className="sr-only">搜索任务结果</span>
@@ -322,16 +317,13 @@ export function NewsList() {
             <label className="relative">
               <Filter className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <select
-                value={industryFilter}
-                onChange={(e) => setIndustryFilter(e.target.value)}
+                value={typeFilter}
+                onChange={(e) => setTypeFilter(e.target.value as 'all' | 'news' | 'file')}
                 className="h-12 w-full appearance-none rounded-2xl border border-slate-200 bg-slate-50 pl-11 pr-4 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:bg-white focus:ring-4 focus:ring-sky-100"
               >
-                <option value="all">全部行业</option>
-                {industries.map((industry) => (
-                  <option key={industry} value={industry}>
-                    {industry}
-                  </option>
-                ))}
+                <option value="all">全部类型</option>
+                <option value="news">新闻</option>
+                <option value="file">文件</option>
               </select>
             </label>
 
@@ -464,6 +456,11 @@ export function NewsList() {
                   </div>
 
                   <div className="mt-5 flex flex-wrap gap-2">
+                    {news.outputType === 'file' && news.fileFormat ? (
+                      <span className="rounded-full bg-sky-50 px-3 py-1 text-xs font-medium text-sky-700">
+                        {news.fileFormat.toUpperCase()}
+                      </span>
+                    ) : null}
                     {news.industries?.map((industry) => (
                       <span key={industry} className="rounded-full bg-sky-50 px-3 py-1 text-xs font-medium text-sky-700">
                         {industry}
@@ -492,34 +489,46 @@ export function NewsList() {
                     </Link>
 
                     <div className="relative">
-                      <button
-                        onClick={() =>
-                          setDownloadMenuOpen(downloadMenuOpen === news.id ? null : news.id)
-                        }
-                        className="inline-flex items-center gap-2 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-2.5 text-sm font-medium text-sky-700 transition hover:bg-sky-100"
-                      >
-                        <Download className="h-4 w-4" />
-                        下载
-                      </button>
+                      {news.outputType === 'file' ? (
+                        <button
+                          onClick={() => downloadSavedFile(news)}
+                          className="inline-flex items-center gap-2 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-2.5 text-sm font-medium text-sky-700 transition hover:bg-sky-100"
+                        >
+                          <Download className="h-4 w-4" />
+                          下载文件
+                        </button>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() =>
+                              setDownloadMenuOpen(downloadMenuOpen === news.id ? null : news.id)
+                            }
+                            className="inline-flex items-center gap-2 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-2.5 text-sm font-medium text-sky-700 transition hover:bg-sky-100"
+                          >
+                            <Download className="h-4 w-4" />
+                            下载
+                          </button>
 
-                      {downloadMenuOpen === news.id && (
-                        <div className="absolute left-0 top-full z-10 mt-2 w-52 rounded-2xl border border-slate-200 bg-white p-2 shadow-[0_18px_40px_rgba(15,23,42,0.12)]">
-                          {[
-                            { key: 'md', label: 'Markdown (.md)', icon: FileText, color: 'text-emerald-500' },
-                            { key: 'txt', label: '文本文件 (.txt)', icon: FileText, color: 'text-slate-400' },
-                            { key: 'json', label: 'JSON (.json)', icon: FileJson, color: 'text-fuchsia-500' },
-                            { key: 'html', label: 'HTML (.html)', icon: FileCode, color: 'text-sky-500' },
-                          ].map((item) => (
-                            <button
-                              key={item.key}
-                              onClick={() => downloadFile(news, item.key as 'md' | 'txt' | 'json' | 'html')}
-                              className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-slate-700 transition hover:bg-slate-50"
-                            >
-                              <item.icon className={`h-4 w-4 ${item.color}`} />
-                              {item.label}
-                            </button>
-                          ))}
-                        </div>
+                          {downloadMenuOpen === news.id && (
+                            <div className="absolute left-0 top-full z-10 mt-2 w-52 rounded-2xl border border-slate-200 bg-white p-2 shadow-[0_18px_40px_rgba(15,23,42,0.12)]">
+                              {[
+                                { key: 'md', label: 'Markdown (.md)', icon: FileText, color: 'text-emerald-500' },
+                                { key: 'txt', label: '文本文件 (.txt)', icon: FileText, color: 'text-slate-400' },
+                                { key: 'json', label: 'JSON (.json)', icon: FileJson, color: 'text-fuchsia-500' },
+                                { key: 'html', label: 'HTML (.html)', icon: FileCode, color: 'text-sky-500' },
+                              ].map((item) => (
+                                <button
+                                  key={item.key}
+                                  onClick={() => downloadFile(news, item.key as 'md' | 'txt' | 'json' | 'html')}
+                                  className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-slate-700 transition hover:bg-slate-50"
+                                >
+                                  <item.icon className={`h-4 w-4 ${item.color}`} />
+                                  {item.label}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </>
                       )}
                     </div>
 

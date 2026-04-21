@@ -40,11 +40,6 @@ const mockConfig = {
       isActive: true,
     },
   ],
-  newsAPI: {
-    provider: 'newsapi',
-    apiKey: process.env.NEWSAPI_API_KEY || '70803be67f5d4647b6e54a35f0615d25',
-    baseUrl: 'https://newsapi.org/v2',
-  },
   publishPlatforms: {
     website: {
       apiUrl: 'https://api.example.com/news',
@@ -55,6 +50,10 @@ const mockConfig = {
       appSecret: 'secret_123',
       token: 'token_123',
     },
+  },
+  workspace: {
+    rootPath: '/Users/shibo/Documents/AI助手工作台',
+    allowAiAccess: true,
   },
   createdAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
   updatedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),

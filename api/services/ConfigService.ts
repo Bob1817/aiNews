@@ -44,11 +44,6 @@ export class ConfigService {
           baseUrl: process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
         },
         aiModels: [],
-        newsAPI: {
-          provider: 'newsapi',
-          apiKey: process.env.NEWSAPI_API_KEY || '70803be67f5d4647b6e54a35f0615d25',
-          baseUrl: 'https://newsapi.org/v2',
-        },
         publishPlatforms: {
           website: {
             apiUrl: 'https://api.example.com/news',
@@ -71,15 +66,6 @@ export class ConfigService {
   async getConfig(userId: string): Promise<UserConfig> {
     const config = ConfigService.userConfigs.find((c) => c.userId === userId)
     if (config) {
-      // 确保有默认的 NewsAPI 配置
-      if (!config.newsAPI) {
-        config.newsAPI = {
-          provider: 'newsapi',
-          apiKey: process.env.NEWSAPI_API_KEY || '70803be67f5d4647b6e54a35f0615d25',
-          baseUrl: 'https://newsapi.org/v2',
-        }
-        config.updatedAt = new Date().toISOString()
-      }
       // 确保 aiModel 对象存在
       if (!config.aiModel) {
         config.aiModel = {
@@ -107,7 +93,7 @@ export class ConfigService {
       return config
     }
 
-    // 如果配置不存在，创建一个新的（包含默认的 NewsAPI 配置）
+    // 如果配置不存在，创建一个新的默认配置
     const newConfig: UserConfig = {
       id: Date.now().toString(),
       userId,
@@ -120,11 +106,6 @@ export class ConfigService {
         baseUrl: '',
       },
       aiModels: [],
-      newsAPI: {
-        provider: 'newsapi',
-        apiKey: process.env.NEWSAPI_API_KEY || '70803be67f5d4647b6e54a35f0615d25',
-        baseUrl: 'https://newsapi.org/v2',
-      },
       publishPlatforms: {},
       workspace: this.normalizeWorkspace(),
       createdAt: new Date().toISOString(),
@@ -145,9 +126,6 @@ export class ConfigService {
 
     if (configData.aiModel) {
       config.aiModel = { ...config.aiModel, ...configData.aiModel }
-    }
-    if (configData.newsAPI) {
-      config.newsAPI = { ...config.newsAPI, ...configData.newsAPI }
     }
     if (configData.publishPlatforms) {
       config.publishPlatforms = { ...config.publishPlatforms, ...configData.publishPlatforms }

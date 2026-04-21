@@ -75,7 +75,7 @@ export class NewsController {
       const news = await this.savedNewsService.saveNews(req.body)
       res.json({
         success: true,
-        message: '新闻保存成功',
+        message: req.body.outputType === 'file' ? '文件保存成功' : '新闻保存成功',
         data: news
       })
     } catch (error) {
@@ -83,6 +83,41 @@ export class NewsController {
       res.status(500).json({ 
         error: '保存新闻失败',
         message: error instanceof Error ? error.message : '未知错误'
+      })
+    }
+  }
+
+  async downloadSavedNewsFile(req: Request, res: Response) {
+    try {
+      const { id } = req.params
+      if (!id) {
+        return res.status(400).json({
+          error: '参数验证失败',
+          message: '内容 ID 不能为空',
+        })
+      }
+
+      const news = await this.savedNewsService.getSavedNewsById(id)
+      if (!news) {
+        return res.status(404).json({
+          error: '内容不存在',
+          message: '找不到指定的内容',
+        })
+      }
+
+      if (news.outputType !== 'file' || !news.filePath || !news.fileName) {
+        return res.status(400).json({
+          error: '下载失败',
+          message: '当前内容不是可下载文件',
+        })
+      }
+
+      return res.download(news.filePath, news.fileName)
+    } catch (error) {
+      console.error('下载文件错误:', error)
+      return res.status(500).json({
+        error: '下载失败',
+        message: error instanceof Error ? error.message : '未知错误',
       })
     }
   }
@@ -207,36 +242,6 @@ export class NewsController {
       console.error('新闻更新错误:', error)
       res.status(500).json({ 
         error: '新闻更新失败',
-        message: error instanceof Error ? error.message : '未知错误'
-      })
-    }
-  }
-
-  // 测试新闻API连接
-  async testNewsAPI(req: Request, res: Response) {
-    try {
-      const { provider, apiKey, baseUrl } = req.body
-      
-      if (!provider || !apiKey) {
-        return res.status(400).json({ 
-          success: false,
-          error: '参数验证失败',
-          message: '提供商和API Key不能为空'
-        })
-      }
-      
-      const result = await this.newsService.testNewsAPI({
-        provider: provider as any,
-        apiKey,
-        baseUrl
-      })
-      
-      res.json(result)
-    } catch (error) {
-      console.error('测试新闻API错误:', error)
-      res.status(500).json({ 
-        success: false,
-        error: '测试连接失败',
         message: error instanceof Error ? error.message : '未知错误'
       })
     }

@@ -51,21 +51,20 @@ export function Sidebar() {
   ]
 
   return (
-    <aside className="hidden w-72 flex-col border-r border-editorial-line bg-white/85 px-4 py-5 text-editorial-ink shadow-[10px_0_30px_rgba(15,23,42,0.04)] backdrop-blur-xl md:flex">
-      <div className="surface-panel-soft relative mb-4 overflow-hidden p-5">
+    <aside className="hidden w-64 flex-col border-r border-editorial-line bg-white/90 px-3 py-4 text-editorial-ink shadow-[8px_0_24px_rgba(15,23,42,0.03)] backdrop-blur-xl md:flex">
+      <div className="surface-panel-soft mb-3 p-4">
         <div className="flex items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-editorial-violet via-editorial-indigo to-editorial-cyan shadow-[0_14px_30px_rgba(37,99,235,0.18)]">
-            <Bot className="h-6 w-6 text-white" />
+          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-600 shadow-[0_10px_24px_rgba(37,99,235,0.2)]">
+            <Bot className="h-5 w-5 text-white" />
           </div>
           <div>
-            <p className="text-[11px] font-medium uppercase tracking-[0.28em] text-editorial-violet/80">AI Workspace</p>
-            <h1 className="mt-1 text-2xl font-semibold text-slate-900">AI 助手</h1>
-            <p className="mt-1 text-sm text-editorial-muted">白天办公场景下的对话式工作流助手</p>
+            <h1 className="text-xl font-semibold text-slate-900">AI 助手</h1>
+            <p className="mt-0.5 text-sm text-editorial-muted">工作台</p>
           </div>
         </div>
       </div>
 
-      <div className="surface-panel-soft mb-4 px-4 py-3">
+      <div className="mb-3">
         <div className="grid gap-3">
           {workspaceItems.map((item) => {
             const Icon = item.icon
@@ -78,7 +77,7 @@ export function Sidebar() {
               <button
                 key={item.path}
                 onClick={item.onClick}
-                className={`focus-ring flex items-center justify-between rounded-2xl border px-4 py-3 text-left transition-all duration-200 ${
+                className={`focus-ring flex items-center justify-between rounded-2xl border px-3.5 py-3 text-left transition-all duration-200 ${
                   isActive
                     ? 'border-blue-200 bg-blue-50 text-blue-700'
                     : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900'
@@ -94,9 +93,9 @@ export function Sidebar() {
         </div>
       </div>
 
-      <div className="mt-auto border-t border-slate-200 pt-4">
+      <div className="mt-auto border-t border-slate-200 pt-3">
         <button
-          className="focus-ring flex w-full items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-700 transition-all duration-200 hover:border-slate-300 hover:bg-white hover:text-slate-900"
+          className="focus-ring flex w-full items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-3.5 py-3 text-slate-700 transition-all duration-200 hover:border-slate-300 hover:bg-white hover:text-slate-900"
           onClick={() => setIsSettingsOpen(!isSettingsOpen)}
         >
           <div className="flex items-center gap-3">
@@ -107,7 +106,7 @@ export function Sidebar() {
         </button>
 
         {isSettingsOpen && (
-          <div className="mt-2 space-y-1 rounded-2xl border border-slate-200 bg-white p-2 shadow-[0_10px_30px_rgba(15,23,42,0.06)]">
+          <div className="mt-2 space-y-1 rounded-2xl border border-slate-200 bg-white p-2 shadow-[0_10px_24px_rgba(15,23,42,0.05)]">
             {settingsItems.map((item) => {
               const Icon = item.icon
               const isActive = location.pathname === item.path

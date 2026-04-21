@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.validators = exports.commonValidators = exports.chatValidators = exports.newsApiConfigValidators = exports.aiConfigValidators = exports.categoryValidators = exports.savedNewsValidators = exports.newsValidators = exports.userValidators = void 0;
+exports.validators = exports.commonValidators = exports.chatValidators = exports.aiConfigValidators = exports.categoryValidators = exports.savedNewsValidators = exports.newsValidators = exports.userValidators = void 0;
 const express_validator_1 = require("express-validator");
 // 用户验证规则
 exports.userValidators = {
@@ -224,22 +224,6 @@ exports.aiConfigValidators = {
             .withMessage('请输入有效的URL'),
     ],
 };
-// 新闻 API 配置验证规则
-exports.newsApiConfigValidators = {
-    update: [
-        (0, express_validator_1.body)('provider')
-            .isIn(['newsapi', 'guardian', 'nytimes'])
-            .withMessage('新闻API提供商必须是 newsapi、guardian 或 nytimes'),
-        (0, express_validator_1.body)('apiKey')
-            .optional()
-            .isLength({ min: 10 })
-            .withMessage('API密钥至少需要10个字符'),
-        (0, express_validator_1.body)('baseUrl')
-            .optional()
-            .isURL()
-            .withMessage('请输入有效的URL'),
-    ],
-};
 // 聊天验证规则
 exports.chatValidators = {
     sendMessage: [
@@ -295,7 +279,6 @@ exports.validators = {
     savedNews: exports.savedNewsValidators,
     category: exports.categoryValidators,
     aiConfig: exports.aiConfigValidators,
-    newsApiConfig: exports.newsApiConfigValidators,
     chat: exports.chatValidators,
     common: exports.commonValidators,
 };

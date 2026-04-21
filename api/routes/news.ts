@@ -16,6 +16,9 @@ router.post('/saved', (req, res) => newsController.saveNews(req, res))
 // 更新新闻
 router.put('/saved/:id', (req, res) => newsController.updateNews(req, res))
 
+// 下载已保存文件
+router.get('/saved/:id/download', (req, res) => newsController.downloadSavedNewsFile(req, res))
+
 // 发布新闻
 router.post('/publish/:id', (req, res) => newsController.publishNews(req, res))
 
@@ -24,8 +27,5 @@ router.delete('/saved/:id', (req, res) => newsController.deleteNews(req, res))
 
 // 手动触发新闻更新
 router.post('/update', (req, res) => newsController.updateNewsFeeds(req, res))
-
-// 测试新闻API连接
-router.post('/test-api', (req, res) => newsController.testNewsAPI(req, res))
 
 export { router as newsRoutes }

@@ -193,14 +193,11 @@ export function Workflows() {
 
   return (
     <div className="flex h-full overflow-hidden">
-      <aside className="w-[340px] border-r border-slate-200 bg-slate-50/70 p-5">
+      <aside className="w-[320px] border-r border-slate-200 bg-slate-50/70 p-4">
         <div className="mb-5 flex items-start justify-between gap-3">
           <div>
-            <span className="eyebrow">Workflow Library</span>
-            <h1 className="mt-3 text-3xl font-semibold text-slate-900">工作流库</h1>
-            <p className="mt-2 text-sm leading-6 text-editorial-muted">
-              通过结构化定义创建可在聊天中用 <code>/名称</code> 或 <code>/+名称</code> 调用的工作流。
-            </p>
+            <h1 className="text-2xl font-semibold text-slate-900">工作流库</h1>
+            <p className="mt-2 text-sm text-editorial-muted">管理可调用工作流。</p>
           </div>
           <button
             onClick={resetForm}
@@ -218,9 +215,9 @@ export function Workflows() {
               <button
                 key={workflow.id}
                 onClick={() => handleSelectWorkflow(workflow)}
-                className={`focus-ring w-full rounded-3xl border p-4 text-left transition-all ${
+                className={`focus-ring w-full rounded-[24px] border p-4 text-left transition-all ${
                   active
-                    ? 'border-blue-200 bg-blue-50 shadow-[0_14px_30px_rgba(37,99,235,0.08)]'
+                    ? 'border-blue-200 bg-blue-50 shadow-[0_10px_24px_rgba(37,99,235,0.06)]'
                     : 'border-slate-200 bg-white hover:bg-slate-50'
                 }`}
               >
@@ -231,7 +228,7 @@ export function Workflows() {
                     </div>
                     <div>
                       <p className="font-medium text-slate-900">{workflow.displayName}</p>
-                      <p className="text-sm text-editorial-muted">{workflow.description}</p>
+                      <p className="line-clamp-2 text-sm text-editorial-muted">{workflow.description}</p>
                     </div>
                   </div>
                   <span className="rounded-full border border-slate-200 px-2 py-1 text-[11px] uppercase tracking-[0.18em] text-editorial-muted">
@@ -254,12 +251,11 @@ export function Workflows() {
       <div className="flex-1 overflow-y-auto p-6">
         <div className="mb-6 flex items-start justify-between gap-4">
           <div>
-            <span className="eyebrow">Workflow Builder</span>
-            <h2 className="mt-3 text-4xl font-semibold text-slate-900">
+            <h2 className="text-3xl font-semibold text-slate-900">
               {selectedWorkflow?.isBuiltIn ? '查看内置工作流定义' : selectedWorkflow ? '编辑工作流' : '创建新工作流'}
             </h2>
-            <p className="mt-3 max-w-3xl text-base leading-7 text-editorial-muted">
-              固定字段用于约束执行，自由扩展说明用于补充业务背景。AI 在工作台命中命令后会严格优先遵循这里的定义。
+            <p className="mt-2 max-w-2xl text-sm text-editorial-muted">
+              配置名称、命令和执行说明。
             </p>
           </div>
           <div className="flex gap-3">
@@ -277,7 +273,7 @@ export function Workflows() {
               <button
                 onClick={handleSave}
                 disabled={isSaving}
-                className="focus-ring flex items-center gap-2 rounded-2xl bg-gradient-to-r from-editorial-violet to-editorial-cyan px-5 py-3 text-white transition-transform hover:-translate-y-0.5 disabled:opacity-60"
+                className="focus-ring flex items-center gap-2 rounded-2xl bg-slate-900 px-5 py-3 text-white transition-colors hover:bg-slate-800 disabled:opacity-60"
               >
                 {selectedWorkflowId ? <Pencil className="h-4 w-4" /> : <CopyPlus className="h-4 w-4" />}
                 {selectedWorkflowId ? '保存更新' : '创建工作流'}
@@ -287,13 +283,13 @@ export function Workflows() {
         </div>
 
         {selectedWorkflow?.isBuiltIn && (
-          <div className="mb-6 rounded-3xl border border-cyan-200 bg-cyan-50 p-5 text-cyan-900">
+          <div className="mb-6 rounded-[24px] border border-cyan-200 bg-cyan-50 p-4 text-cyan-900">
             <div className="flex items-center gap-3">
               <Bot className="h-5 w-5 text-cyan-600" />
               <p className="font-medium">内置工作流只读</p>
             </div>
-            <p className="mt-2 text-sm leading-6 text-cyan-800/80">
-              该工作流用于沉淀系统内置能力，当前版本不支持直接编辑。你可以复制其结构，新建自定义工作流作为变体。
+            <p className="mt-2 text-sm text-cyan-800/80">
+              当前版本不支持直接编辑。
             </p>
           </div>
         )}

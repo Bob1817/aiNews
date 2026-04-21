@@ -10,6 +10,7 @@ const ai_1 = require("./routes/ai");
 const user_1 = require("./routes/user");
 const config_1 = require("./routes/config");
 const category_1 = require("./routes/category");
+const workflow_1 = require("./routes/workflow");
 const ScheduledService_1 = require("./services/ScheduledService");
 const app = (0, express_1.default)();
 const PORT = index_1.env.PORT;
@@ -22,6 +23,7 @@ app.use('/api/ai', ai_1.aiRoutes);
 app.use('/api/user', user_1.userRoutes);
 app.use('/api/config', config_1.configRoutes);
 app.use('/api/categories', category_1.categoryRoutes);
+app.use('/api/workflows', workflow_1.workflowRoutes);
 // 健康检查
 app.get('/api/health', (_req, res) => {
     res.json({
@@ -53,7 +55,7 @@ app.use((err, _req, res, _next) => {
 new ScheduledService_1.ScheduledService();
 // 启动服务器
 app.listen(PORT, () => {
-    console.log('🚀 AI News API 服务器启动成功');
+    console.log('🚀 AI Assistant API 服务器启动成功');
     console.log('='.repeat(50));
     console.log(`端口: ${PORT}`);
     console.log(`环境: ${index_1.env.NODE_ENV}`);

@@ -23,6 +23,33 @@ interface ExecuteWorkflowInput {
 
 export class WorkflowExecutionService {
   private static executions: WorkflowExecution[] = []
+  private readonly keywordNoise = new Set([
+    '新闻',
+    '资讯',
+    '相关',
+    '相关新闻',
+    '推送',
+    '推送一些',
+    '一些',
+    '帮我',
+    '帮我看',
+    '帮我找',
+    '给我',
+    '看看',
+    '获取',
+    '抓取',
+    '搜索',
+    '查找',
+    '检索',
+    '最新',
+    '今天',
+    '最近',
+    '一下',
+    '内容',
+    '消息',
+    '技术',
+    '应用',
+  ])
 
   private workflowService: WorkflowService
   private workflowCommandService: WorkflowCommandService
@@ -208,41 +235,49 @@ export class WorkflowExecutionService {
     const profile = await this.userService.getProfile(userId)
     const focus = message.trim()
     const focusKeywords = await this.extractFocusKeywords(userId, focus)
-    const keywords = this.mergeKeywords(profile.keywords, profile.industries, focusKeywords)
-    const crawlResult = await this.aiCrawlerService.crawlNews(profile, userId, focusKeywords)
+    const fallbackKeywords = this.mergeKeywords(profile.keywords, profile.industries)
+    const crawlKeywords = focusKeywords.length > 0 ? focusKeywords : fallbackKeywords
+    const crawlResult = await this.aiCrawlerService.crawlNews(profile, userId, crawlKeywords)
     const articles = crawlResult.success ? crawlResult.articles : []
     const visibleArticles = this
-      .rankArticlesByFocus(this.dedupeArticles(articles), focusKeywords)
+      .rankArticlesByFocus(this.dedupeArticles(articles), crawlKeywords)
       .slice(0, 6)
 
     if (visibleArticles.length === 0) {
+      const suggestions = [
+        '在任务里补充更具体的关键词，例如公司名、赛道名或地区名。',
+        ...(focusKeywords.length > 0 ? [] : ['到偏好设置中补充长期关注的行业和关键词。']),
+        ...(crawlResult.error ? [`当前爬虫返回信息：${crawlResult.error}`] : []),
+      ]
+
       return [
         '# 新闻推送简报',
         '',
-        `本次爬虫关键词：${keywords.join('、') || '未配置关键词'}`,
+        `本次爬虫关键词：${crawlKeywords.join('、') || '未配置关键词'}`,
         '',
         '暂时没有匹配到足够的相关新闻。你可以：',
-        '1. 在任务里补充更具体的关键词，例如公司名、赛道名或地区名。',
-        '2. 到偏好设置中补充长期关注的行业和关键词。',
-        ...(crawlResult.error ? [`3. 当前爬虫返回信息：${crawlResult.error}`] : []),
+        ...suggestions.map((item, index) => `${index + 1}. ${item}`),
       ].join('\n')
     }
 
     return [
       '# 新闻推送简报',
       '',
-      `本次爬虫关键词：${keywords.join('、') || '未配置关键词'}`,
+      `本次爬虫关键词：${crawlKeywords.join('、') || '未配置关键词'}`,
       ...(focus ? ['', `对话输入关注点：${focus}`] : []),
       '',
       ...visibleArticles.map((article, index) =>
         [
           `## ${index + 1}. ${article.title}`,
-          `原文链接：[点击查看原文](${article.url})`,
-          `来源：${article.source}`,
-          `发布时间：${this.formatRelativeTime(article.publishedAt)}`,
-          `摘要：${article.content}`,
-          `关联关键词：${article.relatedKeywords.join('、') || '未标注'}`,
-          `快捷处理：[生成摘要](${this.buildCommandLink(this.buildNewsAssistantCommand('summary', article))}) [生成成稿](${this.buildCommandLink(this.buildNewsAssistantCommand('draft', article))})`,
+          `- 来源：${article.source}`,
+          `- 发布时间：${this.formatRelativeTime(article.publishedAt)}`,
+          `- 原文：[点击查看原文](${article.url})`,
+          `- 关键词：${article.relatedKeywords.join('、') || '未标注'}`,
+          '',
+          '摘要：',
+          this.formatArticleSummary(article.content),
+          '',
+          `操作：[保存](${this.buildNewsActionLink('save-news', article)}) · [引用](${this.buildNewsActionLink('quote-news', article)})`,
           '',
         ].join('\n')
       ),
@@ -278,11 +313,11 @@ export class WorkflowExecutionService {
       .filter((part) => part.length >= 2)
       .forEach((part) => keywords.add(part))
 
-    const baseKeywords = Array.from(keywords).slice(0, 8)
+    const baseKeywords = this.cleanKeywords(Array.from(keywords))
 
     try {
       const refined = await this.refineKeywordsWithAI(userId, message, baseKeywords)
-      return refined.length > 0 ? this.mergeKeywords(baseKeywords, refined) : baseKeywords
+      return refined.length > 0 ? this.cleanKeywords(this.mergeKeywords(baseKeywords, refined)) : baseKeywords
     } catch (error) {
       console.warn('AI 关键词提炼失败，回退到规则提取:', error)
       return baseKeywords
@@ -311,6 +346,7 @@ export class WorkflowExecutionService {
       .split(/[、,，]/)
       .map((item) => item.trim())
       .filter((item) => item.length >= 2 && item.length <= 20)
+      .filter((item) => !this.keywordNoise.has(item.toLowerCase()))
       .slice(0, 8)
   }
 
@@ -324,6 +360,21 @@ export class WorkflowExecutionService {
       .forEach((item) => keywords.add(item))
 
     return Array.from(keywords)
+  }
+
+  private cleanKeywords(keywords: string[]) {
+    return Array.from(
+      new Set(
+        keywords
+          .map((item) => item.trim())
+          .filter(Boolean)
+          .map((item) => item.replace(/[，。；、/|]+/g, ' ').replace(/\s+/g, ' ').trim())
+          .flatMap((item) => item.split(' '))
+          .map((item) => item.trim())
+          .filter((item) => item.length >= 2 && item.length <= 24)
+          .filter((item) => !this.keywordNoise.has(item.toLowerCase()))
+      )
+    ).slice(0, 8)
   }
 
   private dedupeArticles(articles: NewsArticle[]) {
@@ -389,6 +440,68 @@ export class WorkflowExecutionService {
 
   private buildCommandLink(command: string) {
     return `command:${encodeURIComponent(command)}`
+  }
+
+  private buildNewsActionLink(action: 'save-news' | 'quote-news', article: NewsArticle) {
+    const payload = Buffer.from(
+      JSON.stringify({
+        id: article.id,
+        title: article.title,
+        content: article.content,
+        source: article.source,
+        url: article.url,
+        publishedAt: article.publishedAt,
+        relatedKeywords: article.relatedKeywords,
+        relatedIndustries: article.relatedIndustries,
+      }),
+      'utf-8'
+    ).toString('base64url')
+
+    return `action:${action}:${payload}`
+  }
+
+  private formatArticleSummary(content: string) {
+    const plainText = this.stripHtml(content)
+      .replace(/\s+/g, ' ')
+      .replace(/\u00a0/g, ' ')
+      .trim()
+
+    if (!plainText) {
+      return '- 暂无摘要'
+    }
+
+    const sentences = plainText
+      .split(/(?<=[。！？!?])/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+
+    const selected = (sentences.length > 0 ? sentences : [plainText])
+      .slice(0, 3)
+      .map((item) => this.truncateText(item, 120))
+
+    return selected.map((item) => `- ${item}`).join('\n')
+  }
+
+  private stripHtml(value: string) {
+    return value
+      .replace(/<img[^>]*>/gi, ' ')
+      .replace(/<br\s*\/?>/gi, ' ')
+      .replace(/<\/p>|<\/li>|<\/div>|<\/h\d>/gi, '\n')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/&amp;/gi, '&')
+      .replace(/&lt;/gi, '<')
+      .replace(/&gt;/gi, '>')
+      .replace(/&quot;/gi, '"')
+      .replace(/&#39;/gi, "'")
+  }
+
+  private truncateText(value: string, maxLength: number) {
+    if (value.length <= maxLength) {
+      return value
+    }
+
+    return `${value.slice(0, maxLength).trim()}...`
   }
 
   private formatRelativeTime(publishedAt: string) {

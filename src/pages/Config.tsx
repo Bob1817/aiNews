@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
+  AlertCircle,
   ArrowLeft,
   FolderOpen,
   CheckCircle2,
@@ -7,6 +8,7 @@ import {
   Globe,
   Key,
   MessageSquare,
+  Pencil,
   Plus,
   RefreshCw,
   Save,
@@ -20,7 +22,6 @@ import { Link } from 'react-router-dom'
 import { useToast } from '@/lib/toast'
 import {
   deleteAIModel,
-  getActiveAIModel,
   getConfig,
   getOllamaModels,
   switchAIModel,
@@ -28,83 +29,33 @@ import {
   updateConfig,
 } from '@/lib/api/config'
 import { getErrorMessage } from '@/lib/errors'
-import { testNewsApi } from '@/lib/api/news'
+
 import type { ActiveAIModelInfo, UserConfig, AIModelConfig } from '@/types'
 import { getDefaultConfigForm, getMockConfigForm } from '@/lib/fallbacks'
 
-type NewsApiDiagnostic = {
-  tone: 'info' | 'warning' | 'error'
-  title: string
-  detail: string
-}
 
-function getNewsApiDiagnosis(message: string): NewsApiDiagnostic {
-  const normalized = message.toLowerCase()
-
-  if (normalized.includes('超时') || normalized.includes('timed out') || normalized.includes('timeout')) {
-    return {
-      tone: 'warning',
-      title: '网络超时',
-      detail: '当前环境没有在预期时间内连上新闻源服务。优先检查网络、代理、防火墙，或稍后重试。',
-    }
-  }
-
-  if (
-    normalized.includes('401') ||
-    normalized.includes('api key invalid') ||
-    normalized.includes('apikeymissing') ||
-    (normalized.includes('key') && normalized.includes('invalid'))
-  ) {
-    return {
-      tone: 'error',
-      title: 'Key 无效',
-      detail: '接口已经返回鉴权失败。请确认 API Key 是否完整、是否复制错位，或该 key 是否已失效。',
-    }
-  }
-
-  if (
-    normalized.includes('403') ||
-    normalized.includes('426') ||
-    normalized.includes('429') ||
-    normalized.includes('denied') ||
-    normalized.includes('rate limit') ||
-    normalized.includes('请求失败')
-  ) {
-    return {
-      tone: 'error',
-      title: '接口拒绝',
-      detail: '请求已经到达新闻源，但被服务端拒绝。常见原因是权限不足、额度用尽、地区限制或调用频率过高。',
-    }
-  }
-
-  return {
-    tone: 'info',
-    title: '连接诊断',
-    detail: '测试请求没有正常完成，请根据返回文案继续排查。',
-  }
-}
 
 function ConfigCard({
   icon,
   title,
-  description,
+  hint,
   action,
   children,
 }: {
   icon: ReactNode
   title: string
-  description: string
+  hint?: string
   action?: ReactNode
   children: ReactNode
 }) {
   return (
     <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_45px_rgba(15,23,42,0.06)]">
-      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex items-start gap-4">
+      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-4">
           <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">{icon}</div>
-          <div>
+          <div className="flex items-center gap-2">
             <h2 className="text-xl font-semibold text-slate-900">{title}</h2>
-            <p className="mt-1 text-sm leading-6 text-editorial-muted">{description}</p>
+            {hint && <SectionHint content={hint} />}
           </div>
         </div>
         {action}
@@ -136,30 +87,110 @@ function inputClassName() {
   return 'focus-ring w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 placeholder:text-editorial-muted'
 }
 
-export function Config() {
-  const [config, setConfig] = useState<{
-    aiModel: Required<UserConfig['aiModel']>
-    aiModels: AIModelConfig[]
-    newsAPI?: UserConfig['newsAPI']
+function SectionHint({ content }: { content: string }) {
+  return (
+    <div className="group relative inline-flex">
+      <button
+        type="button"
+        className="flex h-5 w-5 items-center justify-center rounded-full text-slate-400 transition-colors hover:text-slate-700"
+        aria-label="查看说明"
+      >
+        <AlertCircle className="h-4.5 w-4.5" />
+      </button>
+      <div className="pointer-events-none absolute left-full top-1/2 z-20 ml-3 hidden w-72 -translate-y-1/2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm leading-6 text-slate-600 shadow-[0_18px_40px_rgba(15,23,42,0.12)] group-hover:block">
+        {content}
+      </div>
+    </div>
+  )
+}
+
+type ConfigFormState = {
+  aiModel: Required<UserConfig['aiModel']>
+  aiModels: AIModelConfig[]
+  publishPlatforms: {
+    website: {
+      apiUrl: string
+      apiKey: string
+    }
+    wechat: {
+      appId: string
+      appSecret: string
+      token: string
+    }
+  }
+  workspace: UserConfig['workspace']
+}
+
+function normalizeConfigState(data: UserConfig): ConfigFormState {
+  return {
+    aiModel: {
+      ...data.aiModel,
+      baseUrl: data.aiModel.baseUrl || '',
+    },
+    aiModels: data.aiModels || [],
     publishPlatforms: {
       website: {
-        apiUrl: string
-        apiKey: string
-      }
+        apiUrl: data.publishPlatforms.website?.apiUrl || '',
+        apiKey: data.publishPlatforms.website?.apiKey || '',
+      },
       wechat: {
-        appId: string
-        appSecret: string
-        token: string
-      }
-    }
-    workspace: UserConfig['workspace']
-  }>({
+        appId: data.publishPlatforms.wechat?.appId || '',
+        appSecret: data.publishPlatforms.wechat?.appSecret || '',
+        token: data.publishPlatforms.wechat?.token || '',
+      },
+    },
+    workspace: {
+      rootPath: data.workspace?.rootPath || '',
+      allowAiAccess: data.workspace?.allowAiAccess ?? true,
+    },
+  }
+}
+
+function maskValue(value: string, fallback = '未设置') {
+  if (!value) {
+    return fallback
+  }
+
+  if (value.length <= 8) {
+    return '已配置'
+  }
+
+  return `${value.slice(0, 4)}••••${value.slice(-4)}`
+}
+
+function isModelConfigured(model?: {
+  provider?: AIModelConfig['provider'] | null
+  apiKey?: string
+  modelName?: string
+  baseUrl?: string
+} | null) {
+  if (!model?.provider) {
+    return false
+  }
+
+  if (model.provider === 'ollama' || model.provider === 'llamacpp') {
+    return Boolean(model.modelName || model.baseUrl)
+  }
+
+  return Boolean(model.apiKey && model.modelName)
+}
+
+export function Config() {
+  const [config, setConfig] = useState<ConfigFormState>({
     ...getDefaultConfigForm(),
     aiModels: [],
   })
+  const [persistedConfig, setPersistedConfig] = useState<ConfigFormState>({
+    ...getDefaultConfigForm(),
+    aiModels: [],
+  })
+  const [editingSections, setEditingSections] = useState<Record<'workspace' | 'website' | 'wechat', boolean>>({
+    workspace: false,
+    website: false,
+    wechat: false,
+  })
   const [savingSection, setSavingSection] = useState<string | null>(null)
   const [testResults, setTestResults] = useState<{ [key: string]: string }>({})
-  const [testDiagnostics, setTestDiagnostics] = useState<Record<string, NewsApiDiagnostic>>({})
   const [ollamaModels, setOllamaModels] = useState<Array<{ name: string; model: string }>>([])
   const [isFetchingModels, setIsFetchingModels] = useState(false)
   const [showAddModelModal, setShowAddModelModal] = useState(false)
@@ -178,17 +209,7 @@ export function Config() {
   })
   const [isTestingNewModel, setIsTestingNewModel] = useState(false)
   const [isSavingNewModel, setIsSavingNewModel] = useState(false)
-  const [activeAiModel, setActiveAiModel] = useState<ActiveAIModelInfo | null>(null)
   const { showToast } = useToast()
-
-  const refreshActiveAiModel = async () => {
-    try {
-      const data = await getActiveAIModel('1')
-      setActiveAiModel(data)
-    } catch (_error) {
-      setActiveAiModel(null)
-    }
-  }
 
   const fetchOllamaModels = async () => {
     if (newModel.provider === 'ollama' && newModel.baseUrl) {
@@ -212,41 +233,16 @@ export function Config() {
     const fetchConfigData = async () => {
       try {
         const data = await getConfig('1')
-        setConfig({
-          aiModel: {
-            ...data.aiModel,
-            baseUrl: data.aiModel.baseUrl || '',
-          },
-          aiModels: data.aiModels || [],
-          newsAPI: data.newsAPI
-            ? {
-                ...data.newsAPI,
-                baseUrl: data.newsAPI.baseUrl || '',
-              }
-            : undefined,
-          publishPlatforms: {
-            website: {
-              apiUrl: data.publishPlatforms.website?.apiUrl || '',
-              apiKey: data.publishPlatforms.website?.apiKey || '',
-            },
-            wechat: {
-              appId: data.publishPlatforms.wechat?.appId || '',
-              appSecret: data.publishPlatforms.wechat?.appSecret || '',
-              token: data.publishPlatforms.wechat?.token || '',
-            },
-          },
-          workspace: {
-            rootPath: data.workspace?.rootPath || '',
-            allowAiAccess: data.workspace?.allowAiAccess ?? true,
-          },
-        })
-        await refreshActiveAiModel()
+        const normalized = normalizeConfigState(data)
+        setConfig(normalized)
+        setPersistedConfig(normalized)
       } catch (_error) {
-        setConfig({
+        const fallback = {
           ...getMockConfigForm(),
           aiModels: [],
-        })
-        setActiveAiModel(null)
+        }
+        setConfig(fallback)
+        setPersistedConfig(fallback)
         showToast({
           title: '配置加载失败',
           message: '已切换为演示配置。',
@@ -272,15 +268,9 @@ export function Config() {
         userId: '1',
         modelId,
       })
-      setConfig((current) => ({
-        ...current,
-        aiModel: {
-          ...updatedConfig.aiModel,
-          baseUrl: updatedConfig.aiModel.baseUrl || '',
-        },
-        aiModels: updatedConfig.aiModels || [],
-      }))
-      await refreshActiveAiModel()
+      const normalized = normalizeConfigState(updatedConfig)
+      setConfig(normalized)
+      setPersistedConfig(normalized)
       showToast({
         title: '模型切换成功',
         variant: 'success',
@@ -309,11 +299,9 @@ export function Config() {
         userId: '1',
         modelId,
       })
-      setConfig((current) => ({
-        ...current,
-        aiModels: updatedConfig.aiModels || [],
-      }))
-      await refreshActiveAiModel()
+      const normalized = normalizeConfigState(updatedConfig)
+      setConfig(normalized)
+      setPersistedConfig(normalized)
       showToast({
         title: '模型删除成功',
         variant: 'success',
@@ -424,21 +412,14 @@ export function Config() {
               baseUrl: newModel.baseUrl,
             }
           : config.aiModel,
-        newsAPI: config.newsAPI,
         publishPlatforms: config.publishPlatforms,
         workspace: config.workspace,
         aiModels: [...config.aiModels, newModelWithId],
       })
 
-      setConfig((current) => ({
-        ...current,
-        aiModels: updatedConfig.aiModels || [],
-        aiModel: {
-          ...updatedConfig.aiModel,
-          baseUrl: updatedConfig.aiModel.baseUrl || '',
-        },
-      }))
-      await refreshActiveAiModel()
+      const normalized = normalizeConfigState(updatedConfig)
+      setConfig(normalized)
+      setPersistedConfig(normalized)
       resetNewModelForm()
       showToast({
         title: '模型添加成功',
@@ -456,7 +437,7 @@ export function Config() {
   }
 
   const persistConfigSection = async (
-    section: 'newsAPI' | 'website' | 'wechat' | 'workspace',
+    section: 'website' | 'wechat' | 'workspace',
     nextConfig?: typeof config
   ) => {
     const targetConfig = nextConfig || config
@@ -467,46 +448,18 @@ export function Config() {
         userId: '1',
         aiModel: targetConfig.aiModel,
         aiModels: targetConfig.aiModels,
-        newsAPI: targetConfig.newsAPI,
         publishPlatforms: targetConfig.publishPlatforms,
         workspace: targetConfig.workspace,
       })
 
-      setConfig({
-        aiModel: {
-          ...updatedConfig.aiModel,
-          baseUrl: updatedConfig.aiModel.baseUrl || '',
-        },
-        aiModels: updatedConfig.aiModels || [],
-        newsAPI: updatedConfig.newsAPI
-          ? {
-              ...updatedConfig.newsAPI,
-              baseUrl: updatedConfig.newsAPI.baseUrl || '',
-            }
-          : undefined,
-        publishPlatforms: {
-          website: {
-            apiUrl: updatedConfig.publishPlatforms.website?.apiUrl || '',
-            apiKey: updatedConfig.publishPlatforms.website?.apiKey || '',
-          },
-          wechat: {
-            appId: updatedConfig.publishPlatforms.wechat?.appId || '',
-            appSecret: updatedConfig.publishPlatforms.wechat?.appSecret || '',
-            token: updatedConfig.publishPlatforms.wechat?.token || '',
-          },
-        },
-        workspace: {
-          rootPath: updatedConfig.workspace?.rootPath || '',
-          allowAiAccess: updatedConfig.workspace?.allowAiAccess ?? true,
-        },
-      })
-      await refreshActiveAiModel()
+      const normalized = normalizeConfigState(updatedConfig)
+      setConfig(normalized)
+      setPersistedConfig(normalized)
+      setEditingSections((current) => ({ ...current, [section]: false }))
 
       const sectionName =
-        section === 'newsAPI'
-          ? '新闻源配置'
-          : section === 'workspace'
-            ? '工作文件配置'
+        section === 'workspace'
+          ? '工作文件配置'
           : section === 'website'
             ? '官网发布配置'
             : '公众号发布配置'
@@ -528,35 +481,9 @@ export function Config() {
 
   const handleTest = async (platform: string) => {
     setTestResults((current) => ({ ...current, [platform]: '测试中...' }))
-    setTestDiagnostics((current) => {
-      const next = { ...current }
-      delete next[platform]
-      return next
-    })
 
     try {
-      if (platform === 'newsAPI' && config.newsAPI) {
-        const data = await testNewsApi({
-          provider: config.newsAPI.provider,
-          apiKey: config.newsAPI.apiKey,
-          baseUrl: config.newsAPI.baseUrl,
-        })
-        setTestResults((current) => ({
-          ...current,
-          [platform]: data.success ? data.message : `测试失败: ${data.message}`,
-        }))
-        if (!data.success) {
-          setTestDiagnostics((current) => ({
-            ...current,
-            [platform]: getNewsApiDiagnosis(data.message),
-          }))
-        }
-        showToast({
-          title: data.success ? '测试成功' : '测试失败',
-          message: data.message,
-          variant: data.success ? 'success' : 'error',
-        })
-      } else if (platform === 'aiModel') {
+      if (platform === 'aiModel') {
         const data = await testAIModel({
           aiModel: config.aiModel,
         })
@@ -585,12 +512,6 @@ export function Config() {
         ...current,
         [platform]: `测试失败: ${message}`,
       }))
-      if (platform === 'newsAPI') {
-        setTestDiagnostics((current) => ({
-          ...current,
-          [platform]: getNewsApiDiagnosis(message),
-        }))
-      }
       showToast({
         title: '测试连接失败',
         message,
@@ -607,25 +528,78 @@ export function Config() {
     return 'llama.cpp'
   }
 
+  const configuredModels = useMemo(() => {
+    const models = (config.aiModels || []).filter((model) => isModelConfigured(model))
+
+    if (models.length > 0) {
+      return models
+    }
+
+    if (isModelConfigured(config.aiModel)) {
+      return [
+        {
+          id: config.aiModel.id || '__primary__',
+          name: config.aiModel.name || config.aiModel.modelName || '当前模型',
+          provider: config.aiModel.provider,
+          apiKey: config.aiModel.apiKey,
+          modelName: config.aiModel.modelName,
+          baseUrl: config.aiModel.baseUrl,
+          isActive: true,
+        } satisfies AIModelConfig,
+      ]
+    }
+
+    return []
+  }, [config.aiModel, config.aiModels])
+
+  const currentModelId = useMemo(() => {
+    return config.aiModel.id || config.aiModels.find((item) => item.isActive)?.id || configuredModels[0]?.id || null
+  }, [config.aiModel.id, config.aiModels, configuredModels])
+
+  const resolvedActiveModel = useMemo(() => {
+    const currentModel = configuredModels.find((model) => model.id === currentModelId) || configuredModels[0]
+    if (!currentModel) {
+      return null
+    }
+
+    return {
+      configured: true,
+      provider: currentModel.provider,
+      configuredName: currentModel.name,
+      configuredModelName: currentModel.modelName,
+      effectiveModelName: currentModel.modelName || currentModel.name,
+      baseUrl: currentModel.baseUrl || '',
+      source: currentModel.id === config.aiModel.id ? 'primary' : 'fallback',
+    } satisfies ActiveAIModelInfo
+  }, [config.aiModel.id, configuredModels, currentModelId])
+
   const summary = useMemo(
     () => [
-      { label: '已配置模型', value: config.aiModels.length },
+      { label: '模型', value: configuredModels.length },
       {
-        label: '当前生效模型',
+        label: '当前模型',
         value:
-          activeAiModel?.provider === 'ollama'
-            ? activeAiModel.effectiveModelName || '未设置'
-            : activeAiModel?.configuredModelName || activeAiModel?.configuredName || '未设置',
+          resolvedActiveModel?.provider === 'ollama'
+            ? resolvedActiveModel.effectiveModelName || resolvedActiveModel.configuredName || '未设置'
+            : resolvedActiveModel?.configuredModelName || resolvedActiveModel?.configuredName || '未设置',
       },
-      { label: '新闻源', value: config.newsAPI?.provider || '未设置' },
-      { label: '工作目录', value: config.workspace.rootPath ? '已配置' : '未设置' },
+      { label: '目录', value: config.workspace.rootPath ? '已配置' : '未设置' },
     ],
-    [activeAiModel, config.aiModels.length, config.newsAPI?.provider, config.workspace.rootPath]
+    [configuredModels.length, config.workspace.rootPath, resolvedActiveModel]
   )
+
+  const beginEditing = (section: 'workspace' | 'website' | 'wechat') => {
+    setEditingSections((current) => ({ ...current, [section]: true }))
+  }
+
+  const cancelEditing = (section: 'workspace' | 'website' | 'wechat') => {
+    setConfig(persistedConfig)
+    setEditingSections((current) => ({ ...current, [section]: false }))
+  }
 
   return (
     <div className="flex h-full flex-col bg-transparent">
-      <div className="border-b border-slate-200 bg-white px-6 py-5">
+      <div className="border-b border-slate-200 bg-white px-6 py-4">
         <div className="mx-auto flex w-full max-w-6xl items-center gap-4">
           <Link
             to="/chat"
@@ -635,11 +609,7 @@ export function Config() {
             返回
           </Link>
           <div className="flex-1">
-            <span className="eyebrow">Workspace Infrastructure</span>
-            <h1 className="mt-3 text-3xl font-semibold text-slate-900">系统配置</h1>
-            <p className="mt-2 text-sm leading-6 text-editorial-muted">
-              统一管理模型、新闻源和发布渠道。配置完成后，聊天工作流就能直接复用这些能力。
-            </p>
+            <h1 className="text-2xl font-semibold text-slate-900">系统配置</h1>
           </div>
         </div>
       </div>
@@ -650,10 +620,18 @@ export function Config() {
             <ConfigCard
               icon={<Server className="h-5 w-5" />}
               title="AI 模型中心"
-              description="把模型管理做成一个清晰的列表与当前使用态，减少“保存一次就覆盖全部”的不确定感。"
+              hint="这里展示已经配置成功并可用的 AI 模型。当前使用中的模型会被标记出来，只有非当前模型才允许切换或删除。"
               action={
                 <div className="flex flex-wrap items-center gap-3">
-                  <span className="text-sm text-editorial-muted">模型操作会自动保存</span>
+                  {configuredModels.length > 0 && (
+                    <button
+                      onClick={() => handleTest('aiModel')}
+                      className="focus-ring inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 transition-colors hover:bg-slate-100"
+                    >
+                      <TestTube className="h-4 w-4" />
+                      测试当前模型
+                    </button>
+                  )}
                   <button
                     onClick={() => setShowAddModelModal(true)}
                     className="focus-ring inline-flex items-center gap-2 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-blue-700 transition-colors hover:bg-blue-100"
@@ -664,9 +642,12 @@ export function Config() {
                 </div>
               }
             >
-              {config.aiModels.length > 0 ? (
+              {configuredModels.length > 0 ? (
                 <div className="space-y-3">
-                  {config.aiModels.map((model) => (
+                  {configuredModels.map((model) => {
+                    const isCurrentModel = model.id === currentModelId
+
+                    return (
                     <div
                       key={model.id}
                       className="flex flex-col gap-4 rounded-[24px] border border-slate-200 bg-slate-50 px-5 py-4 sm:flex-row sm:items-center sm:justify-between"
@@ -674,13 +655,13 @@ export function Config() {
                       <div className="flex items-start gap-3">
                         <div
                           className={`mt-1 h-3 w-3 rounded-full ${
-                            model.id === config.aiModel.id ? 'bg-emerald-500' : 'bg-slate-300'
+                            isCurrentModel ? 'bg-emerald-500' : 'bg-slate-300'
                           }`}
                         />
                         <div>
                           <div className="flex items-center gap-2">
                             <p className="font-medium text-slate-900">{model.name}</p>
-                            {model.id === config.aiModel.id && (
+                            {isCurrentModel && (
                               <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs text-emerald-700">
                                 当前使用
                               </span>
@@ -694,447 +675,394 @@ export function Config() {
                         </div>
                       </div>
                       <div className="flex gap-2">
-                        <button
-                          onClick={() => handleSwitchModel(model.id)}
-                          disabled={model.id === config.aiModel.id}
-                          className="focus-ring rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700 transition-colors hover:bg-slate-100 disabled:opacity-50"
-                        >
-                          切换
-                        </button>
-                        <button
-                          onClick={() => handleDeleteModel(model.id)}
-                          className="focus-ring rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-rose-700 transition-colors hover:bg-rose-100"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                        {!isCurrentModel && model.id !== '__primary__' && (
+                          <>
+                            <button
+                              onClick={() => handleSwitchModel(model.id)}
+                              className="focus-ring rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700 transition-colors hover:bg-slate-100"
+                            >
+                              切换
+                            </button>
+                            <button
+                              onClick={() => handleDeleteModel(model.id)}
+                              className="focus-ring rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-rose-700 transition-colors hover:bg-rose-100"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </>
+                        )}
                       </div>
                     </div>
-                  ))}
+                    )
+                  })}
                 </div>
               ) : (
                 <div className="rounded-[24px] border border-dashed border-slate-200 bg-slate-50 px-6 py-10 text-center text-editorial-muted">
-                  还没有添加任何模型。建议先添加一个主用模型，让聊天和工作流先稳定可用。
+                  还没有可用模型
                 </div>
               )}
-
-              {config.aiModel.id && (
-                <div className="mt-6 rounded-[24px] border border-slate-200 bg-white px-5 py-5 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
-                  <div className="mb-4 flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-medium text-slate-900">当前模型详情</p>
-                      <p className="mt-1 text-sm text-editorial-muted">用于聊天与工作流执行的主模型。</p>
-                    </div>
-                    <button
-                      onClick={() => handleTest('aiModel')}
-                      className="focus-ring inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm text-slate-700 transition-colors hover:bg-slate-100"
-                    >
-                      <TestTube className="h-4 w-4" />
-                      测试连接
-                    </button>
-                  </div>
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div className="rounded-2xl bg-slate-50 px-4 py-4">
-                      <p className="text-xs uppercase tracking-[0.18em] text-editorial-muted">模型名称</p>
-                      <p className="mt-2 font-medium text-slate-900">{config.aiModel.name}</p>
-                    </div>
-                    <div className="rounded-2xl bg-slate-50 px-4 py-4">
-                      <p className="text-xs uppercase tracking-[0.18em] text-editorial-muted">提供商</p>
-                      <p className="mt-2 font-medium text-slate-900">{providerLabel(config.aiModel.provider)}</p>
-                    </div>
-                    <div className="rounded-2xl bg-slate-50 px-4 py-4">
-                      <p className="text-xs uppercase tracking-[0.18em] text-editorial-muted">模型 ID</p>
-                      <p className="mt-2 font-medium text-slate-900">{config.aiModel.modelName || '未填写'}</p>
-                    </div>
-                    <div className="rounded-2xl bg-slate-50 px-4 py-4">
-                      <p className="text-xs uppercase tracking-[0.18em] text-editorial-muted">基础 URL</p>
-                      <p className="mt-2 font-medium text-slate-900">{config.aiModel.baseUrl || '默认地址'}</p>
-                    </div>
-                    <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-4 md:col-span-2">
-                      <p className="text-xs uppercase tracking-[0.18em] text-blue-700">当前实际生效模型</p>
-                      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-slate-700">
-                        <p className="font-medium text-slate-900">
-                          {activeAiModel?.provider === 'ollama'
-                            ? activeAiModel.effectiveModelName || '未解析'
-                            : activeAiModel?.configuredModelName || activeAiModel?.configuredName || '未设置'}
-                        </p>
-                        {activeAiModel?.provider && (
-                          <span className="rounded-full border border-blue-200 bg-white px-2.5 py-1 text-xs text-blue-700">
-                            {providerLabel(activeAiModel.provider)}
-                          </span>
-                        )}
-                        {activeAiModel?.source && (
-                          <span className="text-xs text-editorial-muted">
-                            {activeAiModel.source === 'primary' ? '来源：当前主模型配置' : '来源：激活模型回退'}
-                          </span>
-                        )}
-                      </div>
-                      {activeAiModel?.provider === 'ollama' && activeAiModel.configuredModelName !== activeAiModel.effectiveModelName && (
-                        <p className="mt-2 text-sm text-editorial-muted">
-                          当前配置未显式填写模型 ID，运行时已自动解析为 <span className="font-medium text-slate-900">{activeAiModel.effectiveModelName}</span>。
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                  {testResults.aiModel && (
-                    <p className={`mt-4 text-sm ${testResults.aiModel.includes('成功') ? 'text-emerald-700' : 'text-amber-700'}`}>
-                      {testResults.aiModel}
-                    </p>
-                  )}
-                </div>
+              {testResults.aiModel && (
+                <p className={`mt-4 text-sm ${testResults.aiModel.includes('成功') ? 'text-emerald-700' : 'text-amber-700'}`}>
+                  {testResults.aiModel}
+                </p>
               )}
             </ConfigCard>
 
             <ConfigCard
               icon={<FolderOpen className="h-5 w-5" />}
               title="工作文件配置"
-              description="安装程序后会默认创建一个工程文件夹，用于存放上传文件、生成文件和任务相关材料。AI 对话时可以读取该目录的文件信息来辅助问答与任务执行。"
+              hint="设置任务默认工作目录。AI 可以在开启授权后读取该目录中的文件清单和文本摘要，辅助完成问答与任务。"
               action={
-                <button
-                  onClick={() => void persistConfigSection('workspace')}
-                  disabled={savingSection === 'workspace'}
-                  className="focus-ring inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-3 text-sm text-white transition-colors hover:bg-slate-800 disabled:opacity-60"
-                >
-                  {savingSection === 'workspace' ? '保存中...' : '保存工作文件配置'}
-                </button>
-              }
-            >
-              <div className="grid gap-4 md:grid-cols-2">
-                <Field
-                  label="工程文件夹"
-                  hint="默认用于存放任务相关文件；如果你不修改这里，系统会自动使用默认目录 `~/Documents/AI助手工作台`，并创建 uploads 与 generated 子目录。"
-                >
-                  <input
-                    type="text"
-                    value={config.workspace.rootPath}
-                    onChange={(e) =>
-                      setConfig((current) => ({
-                        ...current,
-                        workspace: {
-                          ...current.workspace,
-                          rootPath: e.target.value,
-                        },
-                      }))
-                    }
-                    placeholder="留空则使用默认目录：~/Documents/AI助手工作台"
-                    className={inputClassName()}
-                  />
-                </Field>
-                <Field
-                  label="AI 文件访问"
-                  hint="开启后，AI 在聊天时会读取该目录的文件清单和可读文本摘要，用于辅助任务与问答。"
-                >
+                editingSections.workspace ? (
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button
+                      onClick={() => cancelEditing('workspace')}
+                      className="focus-ring inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 transition-colors hover:bg-slate-100"
+                    >
+                      取消
+                    </button>
+                    <button
+                      onClick={() => void persistConfigSection('workspace')}
+                      disabled={savingSection === 'workspace'}
+                      className="focus-ring inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-3 text-sm text-white transition-colors hover:bg-slate-800 disabled:opacity-60"
+                    >
+                      {savingSection === 'workspace' ? '保存中...' : '保存'}
+                    </button>
+                  </div>
+                ) : (
                   <button
-                    type="button"
-                    onClick={() =>
-                      setConfig((current) => ({
-                        ...current,
-                        workspace: {
-                          ...current.workspace,
-                          allowAiAccess: !current.workspace.allowAiAccess,
-                        },
-                      }))
-                    }
-                    className={`focus-ring flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-sm transition-colors ${
-                      config.workspace.allowAiAccess
-                        ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-                        : 'border-slate-200 bg-slate-50 text-slate-700'
-                    }`}
+                    onClick={() => beginEditing('workspace')}
+                    className="focus-ring inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 transition-colors hover:bg-slate-100"
                   >
-                    <span>{config.workspace.allowAiAccess ? '已开启 AI 访问工作目录' : '已关闭 AI 访问工作目录'}</span>
-                    <span className="text-xs">{config.workspace.allowAiAccess ? 'ON' : 'OFF'}</span>
+                    <Pencil className="h-4 w-4" />
+                    编辑
                   </button>
-                </Field>
-              </div>
-              <div className="mt-4 grid gap-4 md:grid-cols-2">
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-                  <p className="text-xs uppercase tracking-[0.18em] text-editorial-muted">上传文件目录</p>
-                  <p className="mt-2 break-all text-sm font-medium text-slate-900">
-                    {config.workspace.rootPath ? `${config.workspace.rootPath}/uploads` : '~/Documents/AI助手工作台/uploads'}
-                  </p>
-                </div>
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-                  <p className="text-xs uppercase tracking-[0.18em] text-editorial-muted">生成文件目录</p>
-                  <p className="mt-2 break-all text-sm font-medium text-slate-900">
-                    {config.workspace.rootPath ? `${config.workspace.rootPath}/generated` : '~/Documents/AI助手工作台/generated'}
-                  </p>
-                </div>
-              </div>
-            </ConfigCard>
-
-            <ConfigCard
-              icon={<Globe className="h-5 w-5" />}
-              title="新闻源配置"
-              description="新闻推送工作流会直接依赖这里的新闻源设置。诊断区会帮助你更快判断是网络、权限还是额度问题。"
-              action={
-                <button
-                  onClick={() => void persistConfigSection('newsAPI')}
-                  disabled={savingSection === 'newsAPI'}
-                  className="focus-ring inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-3 text-sm text-white transition-colors hover:bg-slate-800 disabled:opacity-60"
-                >
-                  {savingSection === 'newsAPI' ? '保存中...' : '保存新闻源配置'}
-                </button>
+                )
               }
             >
-              <div className="grid gap-4 md:grid-cols-2">
-                <Field label="新闻源提供商">
-                  <select
-                    value={config.newsAPI?.provider || 'newsapi'}
-                    onChange={(e) =>
-                      setConfig((current) => ({
-                        ...current,
-                        newsAPI: {
-                          ...current.newsAPI,
-                          provider: e.target.value as 'newsapi' | 'guardian' | 'nytimes',
-                        } as any,
-                      }))
-                    }
-                    className={inputClassName()}
-                  >
-                    <option value="newsapi">NewsAPI</option>
-                    <option value="guardian">The Guardian</option>
-                    <option value="nytimes">New York Times</option>
-                  </select>
-                </Field>
-                <Field label="基础 URL（可选）" hint="只有在使用自定义代理或第三方兼容地址时才需要填写。">
-                  <input
-                    type="url"
-                    value={config.newsAPI?.baseUrl || ''}
-                    onChange={(e) =>
-                      setConfig((current) => ({
-                        ...current,
-                        newsAPI: {
-                          ...current.newsAPI,
-                          baseUrl: e.target.value,
-                        } as any,
-                      }))
-                    }
-                    placeholder="例如：https://newsapi.org/v2"
-                    className={inputClassName()}
-                  />
-                </Field>
-              </div>
-              <div className="mt-4">
-                <Field label="API Key">
-                  <div className="relative">
+              {editingSections.workspace ? (
+                <div className="grid gap-4 md:grid-cols-2">
+                  <Field label="工程文件夹">
                     <input
-                      type="password"
-                      value={config.newsAPI?.apiKey || ''}
+                      type="text"
+                      value={config.workspace.rootPath}
                       onChange={(e) =>
                         setConfig((current) => ({
                           ...current,
-                          newsAPI: {
-                            ...current.newsAPI,
-                            apiKey: e.target.value,
-                          } as any,
+                          workspace: {
+                            ...current.workspace,
+                            rootPath: e.target.value,
+                          },
                         }))
                       }
-                      placeholder="请输入新闻源 API Key"
-                      className={`${inputClassName()} pr-11`}
+                      placeholder="留空则使用默认目录：~/Documents/AI助手工作台"
+                      className={inputClassName()}
                     />
-                    <Key className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                  </div>
-                </Field>
-              </div>
-              <div className="mt-5 flex flex-wrap items-center gap-3">
-                <button
-                  onClick={() => handleTest('newsAPI')}
-                  className="focus-ring inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-700 transition-colors hover:bg-slate-100"
-                >
-                  <TestTube className="h-4 w-4" />
-                  测试新闻源连接
-                </button>
-                {testResults.newsAPI && (
-                  <p className={`text-sm ${testResults.newsAPI.includes('成功') ? 'text-emerald-700' : 'text-amber-700'}`}>
-                    {testResults.newsAPI}
+                  </Field>
+                  <Field label="AI 文件访问">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setConfig((current) => ({
+                          ...current,
+                          workspace: {
+                            ...current.workspace,
+                            allowAiAccess: !current.workspace.allowAiAccess,
+                          },
+                        }))
+                      }
+                      className={`focus-ring flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-sm transition-colors ${
+                        config.workspace.allowAiAccess
+                          ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                          : 'border-slate-200 bg-slate-50 text-slate-700'
+                      }`}
+                    >
+                      <span>{config.workspace.allowAiAccess ? '已开启' : '已关闭'}</span>
+                      <span className="text-xs">{config.workspace.allowAiAccess ? 'ON' : 'OFF'}</span>
+                    </button>
+                  </Field>
+                </div>
+              ) : null}
+              <div className={`${editingSections.workspace ? 'mt-4' : ''} grid gap-4 md:grid-cols-2`}>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                  <p className="text-xs uppercase tracking-[0.18em] text-editorial-muted">{editingSections.workspace ? '上传文件目录' : '工程文件夹'}</p>
+                  <p className="mt-2 break-all text-sm font-medium text-slate-900">
+                    {config.workspace.rootPath || '~/Documents/AI助手工作台'}
                   </p>
-                )}
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                  <p className="text-xs uppercase tracking-[0.18em] text-editorial-muted">{editingSections.workspace ? '生成文件目录' : 'AI 文件访问'}</p>
+                  <p className="mt-2 break-all text-sm font-medium text-slate-900">
+                    {editingSections.workspace
+                      ? config.workspace.rootPath
+                        ? `${config.workspace.rootPath}/generated`
+                        : '~/Documents/AI助手工作台/generated'
+                      : config.workspace.allowAiAccess
+                        ? '已开启'
+                        : '已关闭'}
+                  </p>
+                </div>
               </div>
-              {testDiagnostics.newsAPI && (
-                <div
-                  className={`mt-4 rounded-2xl border px-4 py-4 text-sm ${
-                    testDiagnostics.newsAPI.tone === 'error'
-                      ? 'border-rose-200 bg-rose-50 text-rose-700'
-                      : testDiagnostics.newsAPI.tone === 'warning'
-                        ? 'border-amber-200 bg-amber-50 text-amber-700'
-                        : 'border-blue-200 bg-blue-50 text-blue-700'
-                  }`}
-                >
-                  <p className="font-medium">{testDiagnostics.newsAPI.title}</p>
-                  <p className="mt-1 leading-6">{testDiagnostics.newsAPI.detail}</p>
+              {!editingSections.workspace && (
+                <div className="mt-4 grid gap-4 md:grid-cols-2">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                    <p className="text-xs uppercase tracking-[0.18em] text-editorial-muted">上传文件目录</p>
+                    <p className="mt-2 break-all text-sm font-medium text-slate-900">
+                      {config.workspace.rootPath ? `${config.workspace.rootPath}/uploads` : '~/Documents/AI助手工作台/uploads'}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                    <p className="text-xs uppercase tracking-[0.18em] text-editorial-muted">生成文件目录</p>
+                    <p className="mt-2 break-all text-sm font-medium text-slate-900">
+                      {config.workspace.rootPath ? `${config.workspace.rootPath}/generated` : '~/Documents/AI助手工作台/generated'}
+                    </p>
+                  </div>
                 </div>
               )}
             </ConfigCard>
 
+
+
             <ConfigCard
               icon={<MessageSquare className="h-5 w-5" />}
               title="发布渠道"
-              description="把常用发布渠道整理到一起，便于结果页中的后续发布动作直接复用。"
+              hint="维护新闻对外发布所需的渠道配置。默认以文本显示，只有在编辑对应渠道时才会进入表单态。"
             >
               <div className="grid gap-6 lg:grid-cols-2">
                 <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
-                  <div className="mb-4 flex items-center gap-3">
+                  <div className="mb-4 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
                     <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-700">
                       <Globe className="h-5 w-5" />
                     </div>
                     <div>
                       <h3 className="font-medium text-slate-900">官网发布</h3>
-                      <p className="text-sm text-editorial-muted">适合内部 CMS 或企业官网接口。</p>
                     </div>
-                  </div>
-                  <div className="space-y-4">
-                    <Field label="API URL">
-                      <input
-                        type="url"
-                        value={config.publishPlatforms.website.apiUrl}
-                        onChange={(e) =>
-                          setConfig((current) => ({
-                            ...current,
-                            publishPlatforms: {
-                              ...current.publishPlatforms,
-                              website: {
-                                ...current.publishPlatforms.website,
-                                apiUrl: e.target.value,
-                              },
-                            },
-                          }))
-                        }
-                        placeholder="请输入官网发布 API URL"
-                        className={inputClassName()}
-                      />
-                    </Field>
-                    <Field label="API Key">
-                      <input
-                        type="password"
-                        value={config.publishPlatforms.website.apiKey}
-                        onChange={(e) =>
-                          setConfig((current) => ({
-                            ...current,
-                            publishPlatforms: {
-                              ...current.publishPlatforms,
-                              website: {
-                                ...current.publishPlatforms.website,
-                                apiKey: e.target.value,
-                              },
-                            },
-                          }))
-                        }
-                        placeholder="请输入官网发布 API Key"
-                        className={inputClassName()}
-                      />
-                    </Field>
-                    <button
-                      onClick={() => void persistConfigSection('website')}
-                      disabled={savingSection === 'website'}
-                      className="focus-ring inline-flex items-center justify-center rounded-2xl bg-slate-900 px-4 py-3 text-sm text-white transition-colors hover:bg-slate-800 disabled:opacity-60"
-                    >
-                      {savingSection === 'website' ? '保存中...' : '保存官网配置'}
-                    </button>
-                    <button
-                      onClick={() => handleTest('website')}
-                      className="focus-ring inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-700 transition-colors hover:bg-slate-100"
-                    >
-                      <TestTube className="h-4 w-4" />
-                      测试官网连接
-                    </button>
-                    {testResults.website && (
-                      <p className={`text-sm ${testResults.website.includes('成功') ? 'text-emerald-700' : 'text-amber-700'}`}>
-                        {testResults.website}
-                      </p>
+                    </div>
+                    {editingSections.website ? (
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleTest('website')}
+                          className="focus-ring inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-700 transition-colors hover:bg-slate-100"
+                        >
+                          <TestTube className="h-4 w-4" />
+                          测试
+                        </button>
+                        <button
+                          onClick={() => cancelEditing('website')}
+                          className="focus-ring inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-700 transition-colors hover:bg-slate-100"
+                        >
+                          取消
+                        </button>
+                        <button
+                          onClick={() => void persistConfigSection('website')}
+                          disabled={savingSection === 'website'}
+                          className="focus-ring inline-flex items-center justify-center rounded-2xl bg-slate-900 px-4 py-2.5 text-sm text-white transition-colors hover:bg-slate-800 disabled:opacity-60"
+                        >
+                          {savingSection === 'website' ? '保存中...' : '保存'}
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => beginEditing('website')}
+                        className="focus-ring inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-700 transition-colors hover:bg-slate-100"
+                      >
+                        <Pencil className="h-4 w-4" />
+                        编辑
+                      </button>
                     )}
                   </div>
+                  {editingSections.website ? (
+                    <div className="space-y-4">
+                      <Field label="API URL">
+                        <input
+                          type="url"
+                          value={config.publishPlatforms.website.apiUrl}
+                          onChange={(e) =>
+                            setConfig((current) => ({
+                              ...current,
+                              publishPlatforms: {
+                                ...current.publishPlatforms,
+                                website: {
+                                  ...current.publishPlatforms.website,
+                                  apiUrl: e.target.value,
+                                },
+                              },
+                            }))
+                          }
+                          placeholder="请输入官网发布 API URL"
+                          className={inputClassName()}
+                        />
+                      </Field>
+                      <Field label="API Key">
+                        <input
+                          type="password"
+                          value={config.publishPlatforms.website.apiKey}
+                          onChange={(e) =>
+                            setConfig((current) => ({
+                              ...current,
+                              publishPlatforms: {
+                                ...current.publishPlatforms,
+                                website: {
+                                  ...current.publishPlatforms.website,
+                                  apiKey: e.target.value,
+                                },
+                              },
+                            }))
+                          }
+                          placeholder="请输入官网发布 API Key"
+                          className={inputClassName()}
+                        />
+                      </Field>
+                    </div>
+                  ) : (
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+                        <p className="text-xs uppercase tracking-[0.18em] text-editorial-muted">API URL</p>
+                        <p className="mt-2 break-all font-medium text-slate-900">{config.publishPlatforms.website.apiUrl || '未设置'}</p>
+                      </div>
+                      <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+                        <p className="text-xs uppercase tracking-[0.18em] text-editorial-muted">API Key</p>
+                        <p className="mt-2 font-medium text-slate-900">{maskValue(config.publishPlatforms.website.apiKey)}</p>
+                      </div>
+                    </div>
+                  )}
+                  {testResults.website && (
+                    <p className={`mt-4 text-sm ${testResults.website.includes('成功') ? 'text-emerald-700' : 'text-amber-700'}`}>
+                      {testResults.website}
+                    </p>
+                  )}
                 </div>
 
                 <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
-                  <div className="mb-4 flex items-center gap-3">
+                  <div className="mb-4 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
                     <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-sky-100 text-sky-700">
                       <MessageSquare className="h-5 w-5" />
                     </div>
                     <div>
                       <h3 className="font-medium text-slate-900">微信公众号</h3>
-                      <p className="text-sm text-editorial-muted">适合面向公众输出内容时的后续发布。</p>
                     </div>
-                  </div>
-                  <div className="space-y-4">
-                    <Field label="App ID">
-                      <input
-                        type="text"
-                        value={config.publishPlatforms.wechat.appId}
-                        onChange={(e) =>
-                          setConfig((current) => ({
-                            ...current,
-                            publishPlatforms: {
-                              ...current.publishPlatforms,
-                              wechat: {
-                                ...current.publishPlatforms.wechat,
-                                appId: e.target.value,
-                              },
-                            },
-                          }))
-                        }
-                        placeholder="请输入微信公众号 App ID"
-                        className={inputClassName()}
-                      />
-                    </Field>
-                    <Field label="App Secret">
-                      <input
-                        type="password"
-                        value={config.publishPlatforms.wechat.appSecret}
-                        onChange={(e) =>
-                          setConfig((current) => ({
-                            ...current,
-                            publishPlatforms: {
-                              ...current.publishPlatforms,
-                              wechat: {
-                                ...current.publishPlatforms.wechat,
-                                appSecret: e.target.value,
-                              },
-                            },
-                          }))
-                        }
-                        placeholder="请输入 App Secret"
-                        className={inputClassName()}
-                      />
-                    </Field>
-                    <Field label="Token">
-                      <input
-                        type="password"
-                        value={config.publishPlatforms.wechat.token}
-                        onChange={(e) =>
-                          setConfig((current) => ({
-                            ...current,
-                            publishPlatforms: {
-                              ...current.publishPlatforms,
-                              wechat: {
-                                ...current.publishPlatforms.wechat,
-                                token: e.target.value,
-                              },
-                            },
-                          }))
-                        }
-                        placeholder="请输入 Token"
-                        className={inputClassName()}
-                      />
-                    </Field>
-                    <button
-                      onClick={() => void persistConfigSection('wechat')}
-                      disabled={savingSection === 'wechat'}
-                      className="focus-ring inline-flex items-center justify-center rounded-2xl bg-slate-900 px-4 py-3 text-sm text-white transition-colors hover:bg-slate-800 disabled:opacity-60"
-                    >
-                      {savingSection === 'wechat' ? '保存中...' : '保存公众号配置'}
-                    </button>
-                    <button
-                      onClick={() => handleTest('wechat')}
-                      className="focus-ring inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-700 transition-colors hover:bg-slate-100"
-                    >
-                      <TestTube className="h-4 w-4" />
-                      测试公众号连接
-                    </button>
-                    {testResults.wechat && (
-                      <p className={`text-sm ${testResults.wechat.includes('成功') ? 'text-emerald-700' : 'text-amber-700'}`}>
-                        {testResults.wechat}
-                      </p>
+                    </div>
+                    {editingSections.wechat ? (
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleTest('wechat')}
+                          className="focus-ring inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-slate-700 transition-colors hover:bg-slate-100"
+                        >
+                          <TestTube className="h-4 w-4" />
+                          测试
+                        </button>
+                        <button
+                          onClick={() => cancelEditing('wechat')}
+                          className="focus-ring inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-700 transition-colors hover:bg-slate-100"
+                        >
+                          取消
+                        </button>
+                        <button
+                          onClick={() => void persistConfigSection('wechat')}
+                          disabled={savingSection === 'wechat'}
+                          className="focus-ring inline-flex items-center justify-center rounded-2xl bg-slate-900 px-4 py-2.5 text-sm text-white transition-colors hover:bg-slate-800 disabled:opacity-60"
+                        >
+                          {savingSection === 'wechat' ? '保存中...' : '保存'}
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => beginEditing('wechat')}
+                        className="focus-ring inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-700 transition-colors hover:bg-slate-100"
+                      >
+                        <Pencil className="h-4 w-4" />
+                        编辑
+                      </button>
                     )}
                   </div>
+                  {editingSections.wechat ? (
+                    <div className="space-y-4">
+                      <Field label="App ID">
+                        <input
+                          type="text"
+                          value={config.publishPlatforms.wechat.appId}
+                          onChange={(e) =>
+                            setConfig((current) => ({
+                              ...current,
+                              publishPlatforms: {
+                                ...current.publishPlatforms,
+                                wechat: {
+                                  ...current.publishPlatforms.wechat,
+                                  appId: e.target.value,
+                                },
+                              },
+                            }))
+                          }
+                          placeholder="请输入微信公众号 App ID"
+                          className={inputClassName()}
+                        />
+                      </Field>
+                      <Field label="App Secret">
+                        <input
+                          type="password"
+                          value={config.publishPlatforms.wechat.appSecret}
+                          onChange={(e) =>
+                            setConfig((current) => ({
+                              ...current,
+                              publishPlatforms: {
+                                ...current.publishPlatforms,
+                                wechat: {
+                                  ...current.publishPlatforms.wechat,
+                                  appSecret: e.target.value,
+                                },
+                              },
+                            }))
+                          }
+                          placeholder="请输入 App Secret"
+                          className={inputClassName()}
+                        />
+                      </Field>
+                      <Field label="Token">
+                        <input
+                          type="password"
+                          value={config.publishPlatforms.wechat.token}
+                          onChange={(e) =>
+                            setConfig((current) => ({
+                              ...current,
+                              publishPlatforms: {
+                                ...current.publishPlatforms,
+                                wechat: {
+                                  ...current.publishPlatforms.wechat,
+                                  token: e.target.value,
+                                },
+                              },
+                            }))
+                          }
+                          placeholder="请输入 Token"
+                          className={inputClassName()}
+                        />
+                      </Field>
+                    </div>
+                  ) : (
+                    <div className="grid gap-4">
+                      <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+                        <p className="text-xs uppercase tracking-[0.18em] text-editorial-muted">App ID</p>
+                        <p className="mt-2 font-medium text-slate-900">{maskValue(config.publishPlatforms.wechat.appId)}</p>
+                      </div>
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+                          <p className="text-xs uppercase tracking-[0.18em] text-editorial-muted">App Secret</p>
+                          <p className="mt-2 font-medium text-slate-900">{maskValue(config.publishPlatforms.wechat.appSecret)}</p>
+                        </div>
+                        <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+                          <p className="text-xs uppercase tracking-[0.18em] text-editorial-muted">Token</p>
+                          <p className="mt-2 font-medium text-slate-900">{maskValue(config.publishPlatforms.wechat.token)}</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {testResults.wechat && (
+                    <p className={`mt-4 text-sm ${testResults.wechat.includes('成功') ? 'text-emerald-700' : 'text-amber-700'}`}>
+                      {testResults.wechat}
+                    </p>
+                  )}
                 </div>
               </div>
             </ConfigCard>
@@ -1164,7 +1092,7 @@ export function Config() {
                 </p>
                 <p className="flex gap-3">
                   <CheckCircle2 className="mt-1 h-4 w-4 flex-shrink-0 text-emerald-500" />
-                  再配置新闻源，让“新闻推送”工作流能按关键词返回有效简报。
+                  如需让 AI 处理本地文件，补齐工作文件目录并开启 AI 文件访问。
                 </p>
                 <p className="flex gap-3">
                   <CheckCircle2 className="mt-1 h-4 w-4 flex-shrink-0 text-emerald-500" />
@@ -1179,11 +1107,11 @@ export function Config() {
               <div className="mt-4 space-y-4 text-sm leading-7 text-editorial-muted">
                 <p className="flex gap-3">
                   <Cpu className="mt-1 h-4 w-4 flex-shrink-0 text-blue-500" />
-                  Ollama 默认地址通常是 <code>http://localhost:11434</code>。
+                  Ollama 默认地址是 <code>http://localhost:11434</code>。
                 </p>
                 <p className="flex gap-3">
                   <Cpu className="mt-1 h-4 w-4 flex-shrink-0 text-blue-500" />
-                  llama.cpp 默认地址通常是 <code>http://localhost:8080</code>。
+                  llama.cpp 默认地址是 <code>http://localhost:8080</code>。
                 </p>
                 <p className="flex gap-3">
                   <Sparkles className="mt-1 h-4 w-4 flex-shrink-0 text-blue-500" />

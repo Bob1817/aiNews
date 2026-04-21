@@ -1,369 +1,344 @@
 import { NewsArticle, UserProfile } from '../../shared/types'
-import { ConfigService } from './ConfigService'
 
-// 爬取结果接口
 interface CrawlResult {
   success: boolean
   articles: NewsArticle[]
   error?: string
 }
 
-interface AIConfig {
-  provider: 'openai' | 'anthropic' | 'google' | 'ollama'
-  apiKey: string
-  modelName: string
-  baseUrl?: string
-}
-
-interface NewsSourceConfig {
-  provider: 'newsapi' | 'guardian' | 'nytimes'
-  apiKey: string
-  baseUrl?: string
+interface RssCandidate {
+  title: string
+  link: string
+  description: string
+  source: string
+  publishedAt: string
 }
 
 export class AICrawlerService {
   private crawledArticles: NewsArticle[] = []
-  private configService: ConfigService
+  private readonly keywordStopwords = new Set([
+    '新闻',
+    '资讯',
+    '相关',
+    '相关新闻',
+    '推送',
+    '推送一些',
+    '一些',
+    '帮我',
+    '帮我看',
+    '帮我找',
+    '给我',
+    '看看',
+    '获取',
+    '抓取',
+    '搜索',
+    '查找',
+    '检索',
+    '最新',
+    '今天',
+    '最近',
+    '一下',
+    '内容',
+    '消息',
+    '方向',
+    '领域',
+    '行业',
+    '技术',
+    '应用',
+  ])
 
-  constructor() {
-    this.configService = new ConfigService()
-  }
+  private readonly rssSources = [
+    {
+      name: 'IT之家',
+      buildUrl: (_query: string) => 'https://www.ithome.com/rss/',
+    },
+    {
+      name: '36氪',
+      buildUrl: (_query: string) => 'https://36kr.com/feed',
+    },
+    {
+      name: 'InfoQ 中文',
+      buildUrl: (_query: string) => 'https://www.infoq.cn/feed',
+    },
+  ]
 
-  // 基于用户兴趣爬取新闻
   async crawlNews(
     userProfile?: UserProfile,
-    userId?: string,
+    _userId?: string,
     extraKeywords: string[] = []
   ): Promise<CrawlResult> {
     try {
-      // 提取用户兴趣关键词，并合并本次对话输入的关键词
       const keywords = this.extractKeywords(userProfile, extraKeywords)
-      
+
       if (keywords.length === 0) {
         return {
           success: false,
           articles: [],
-          error: '未找到用户关注的关键词'
+          error: '未找到可用于抓取新闻的关键词',
         }
       }
 
-      console.log('开始爬取新闻，关键词:', keywords)
-
-      const articles = await this.simulateCrawling(keywords, userId)
-
+      const articles = await this.fetchPublicNews(keywords)
       this.crawledArticles = articles
+
       return {
         success: true,
-        articles
+        articles,
       }
     } catch (error) {
-      console.error('爬虫执行失败:', error)
+      console.error('AI 爬虫执行失败:', error)
       return {
         success: false,
         articles: [],
-        error: error instanceof Error ? error.message : '未知错误'
+        error: error instanceof Error ? error.message : '未知错误',
       }
     }
   }
 
-  // 提取用户兴趣关键词
+  private normalizeKeywords(keywords: string[]) {
+    return Array.from(
+      new Set(
+        keywords
+          .map((keyword) => keyword.trim())
+          .filter(Boolean)
+          .map((keyword) => keyword.replace(/[，。；、/|]+/g, ' ').replace(/\s+/g, ' ').trim())
+          .flatMap((keyword) => keyword.split(' '))
+          .map((keyword) => keyword.trim())
+          .filter((keyword) => keyword.length >= 2 && keyword.length <= 24)
+          .filter((keyword) => !this.keywordStopwords.has(keyword.toLowerCase()))
+      )
+    ).slice(0, 8)
+  }
+
   private extractKeywords(userProfile?: UserProfile, extraKeywords: string[] = []): string[] {
+    const normalizedExtraKeywords = this.normalizeKeywords(extraKeywords)
+    if (normalizedExtraKeywords.length > 0) {
+      return normalizedExtraKeywords
+    }
+
     const keywords = new Set<string>()
 
-    // 添加用户设置的关键词
-    if (userProfile?.keywords && userProfile.keywords.length > 0) {
-      userProfile.keywords.forEach(keyword => keywords.add(keyword))
-    }
+    userProfile?.keywords?.forEach((keyword) => keywords.add(keyword))
+    userProfile?.industries?.forEach((industry) => keywords.add(industry))
 
-    // 添加用户关注的行业作为关键词
-    if (userProfile?.industries && userProfile.industries.length > 0) {
-      userProfile.industries.forEach(industry => keywords.add(industry))
-    }
-
-    // 添加本次任务里额外指定的关键词
-    extraKeywords
-      .map((keyword) => keyword.trim())
-      .filter(Boolean)
-      .forEach((keyword) => keywords.add(keyword))
-
-    // 默认关键词
     if (keywords.size === 0) {
       return ['人工智能', '科技', '财经', '健康']
     }
 
-    return Array.from(keywords)
+    return this.normalizeKeywords(Array.from(keywords))
   }
 
-  private async simulateCrawling(keywords: string[], userId?: string): Promise<NewsArticle[]> {
-    const realArticles = await this.fetchRealNews(keywords, userId)
+  private async fetchPublicNews(keywords: string[]): Promise<NewsArticle[]> {
+    const settled = await Promise.allSettled(
+      this.rssSources.map((source) => this.fetchFromRssSource(source.name, source.buildUrl(''), keywords))
+    )
 
-    if (realArticles.length > 0) {
-      return realArticles
+    const articles = settled
+      .filter((result): result is PromiseFulfilledResult<NewsArticle[]> => result.status === 'fulfilled')
+      .flatMap((result) => result.value)
+
+    if (articles.length > 0) {
+      return this.dedupeArticles(articles).slice(0, 12)
     }
 
-    throw new Error('未从真实新闻源抓取到相关新闻，请检查新闻源配置或调整关键词')
+    const errors = settled
+      .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+      .map((result) => (result.reason instanceof Error ? result.reason.message : '未知抓取错误'))
+
+    throw new Error(errors[0] || '公开互联网新闻抓取失败，请稍后重试')
   }
 
-  // 获取 AI 配置
-  private async getAIConfig(userId?: string): Promise<AIConfig> {
-    try {
-      if (userId) {
-        const config = await this.configService.getConfig(userId)
-        return {
-          provider: config.aiModel.provider as any,
-          apiKey: config.aiModel.apiKey,
-          modelName: config.aiModel.modelName,
-          baseUrl: config.aiModel.baseUrl,
-        }
-      }
-    } catch (error) {
-      console.log('获取配置失败，使用默认配置:', error)
-    }
-    // 如果获取配置失败，使用默认配置
-    return {
-      provider: 'ollama',
-      apiKey: '',
-      modelName: 'gemma',
-      baseUrl: 'http://localhost:11434',
-    }
-  }
-
-  private async getNewsSourceConfig(userId?: string): Promise<NewsSourceConfig | null> {
-    if (!userId) {
-      return null
-    }
+  private async fetchFromRssSource(sourceName: string, url: string, keywords: string[]) {
+    let response: Response
 
     try {
-      const config = await this.configService.getConfig(userId)
-      if (!config.newsAPI?.apiKey) {
-        return null
-      }
-
-      return {
-        provider: config.newsAPI.provider,
-        apiKey: config.newsAPI.apiKey,
-        baseUrl: config.newsAPI.baseUrl,
-      }
+      response = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (compatible; AI-Assistant-NewsCrawler/1.0)',
+          Accept: 'application/rss+xml, application/xml, text/xml, text/html;q=0.9, */*;q=0.8',
+        },
+      })
     } catch (error) {
-      console.error('获取新闻源配置失败:', error)
-      return null
+      const message = error instanceof Error ? error.message : '未知网络错误'
+      throw new Error(`${sourceName} 抓取失败（${message}）`)
     }
-  }
-
-  private async fetchRealNews(keywords: string[], userId?: string): Promise<NewsArticle[]> {
-    const config = await this.getNewsSourceConfig(userId)
-
-    if (!config) {
-      throw new Error('未配置可用的新闻源 API，请先在系统配置中完成新闻源设置')
-    }
-
-    if (config.provider === 'newsapi') {
-      return this.fetchNewsFromNewsApi(config, keywords)
-    }
-
-    throw new Error(`当前新闻源 ${config.provider} 暂未接入真实抓取`)
-  }
-
-  private async fetchNewsFromNewsApi(
-    config: NewsSourceConfig,
-    keywords: string[]
-  ): Promise<NewsArticle[]> {
-    const baseUrl = (config.baseUrl || 'https://newsapi.org/v2').replace(/\/$/, '')
-    const requestUrl = new URL(`${baseUrl}/everything`)
-    const query = keywords.slice(0, 6).join(' OR ')
-
-    requestUrl.searchParams.set('q', query)
-    requestUrl.searchParams.set('language', 'zh')
-    requestUrl.searchParams.set('sortBy', 'publishedAt')
-    requestUrl.searchParams.set('pageSize', '10')
-
-    const response = await fetch(requestUrl.toString(), {
-      method: 'GET',
-      headers: {
-        'X-Api-Key': config.apiKey,
-      },
-    })
-
-    const contentType = response.headers.get('content-type') || ''
-    const isJson = contentType.includes('application/json')
-    const data = isJson ? await response.json() : await response.text()
 
     if (!response.ok) {
-      const message =
-        typeof data === 'object' && data !== null && 'message' in data
-          ? String(data.message)
-          : `新闻源请求失败: ${response.status}`
-      throw new Error(message)
+      throw new Error(`${sourceName} 抓取失败（HTTP ${response.status}）`)
     }
 
-    const rawArticles =
-      typeof data === 'object' && data !== null && 'articles' in data
-        ? (data.articles as Array<{
-            title?: string
-            description?: string
-            content?: string
-            url?: string
-            publishedAt?: string
-            source?: { name?: string }
-          }>)
-        : []
+    const xml = await response.text()
+    const candidates = this.parseRssItems(xml, sourceName)
 
-    return rawArticles
-      .filter((item) => item.title && item.url)
-      .map((item, index) => {
-        const summary = (item.description || item.content || '暂无摘要')
-          .replace(/\[\+\d+\schars\]$/, '')
-          .trim()
-        const matchedKeywords = keywords.filter((keyword) =>
-          `${item.title} ${summary}`.toLowerCase().includes(keyword.toLowerCase())
-        )
-
-        return {
-          id: `newsapi_${Date.now()}_${index}`,
-          title: item.title || '未命名新闻',
-          content: summary,
-          source: item.source?.name || 'NewsAPI',
-          url: item.url || '',
-          publishedAt: item.publishedAt || new Date().toISOString(),
-          relatedIndustries: [],
-          relatedKeywords: matchedKeywords.length > 0 ? matchedKeywords : keywords.slice(0, 4),
-        }
-      })
+    return candidates
+      .filter((item) => this.matchesKeywords(item, keywords))
+      .map((item, index) => this.toArticle(item, keywords, sourceName, index))
   }
 
-  // 调用 Ollama API 获取推荐新闻
-  private async callOllamaForNews(keywords: string[], userId?: string): Promise<NewsArticle[]> {
-    const config = await this.getAIConfig(userId)
-    const baseUrl = config.baseUrl || 'http://localhost:11434'
-    const modelName = config.modelName || 'gemma'
-    
-    const prompt = `请基于以下关键词为我生成最近的新闻推荐：${keywords.join('、')}。
+  private parseRssItems(xml: string, sourceName: string): RssCandidate[] {
+    const items = xml.match(/<item\b[\s\S]*?<\/item>/gi) || []
 
-每个新闻请包含以下信息：
-1. 标题
-2. 内容摘要
-3. 来源
-4. 相关行业
-5. 相关关键词
+    return items.map((item, index) => {
+      const title = this.extractTag(item, 'title') || `${sourceName} 新闻 ${index + 1}`
+      const description = this.cleanHtml(this.extractTag(item, 'description') || this.extractTag(item, 'content:encoded') || '')
+      const rawLink = this.extractTag(item, 'link') || ''
+      const guid = this.extractTag(item, 'guid') || ''
+      const pubDate = this.extractTag(item, 'pubDate') || this.extractTag(item, 'published') || ''
 
-请生成至少6条不同的新闻，格式如下：
+      return {
+        title: this.decodeHtml(title),
+        description: this.decodeHtml(description).trim() || '暂无摘要',
+        link: this.normalizeLink(rawLink || guid),
+        source: sourceName,
+        publishedAt: pubDate ? new Date(pubDate).toISOString() : new Date().toISOString(),
+      }
+    }).filter((item) => item.link)
+  }
 
-标题：[新闻标题]
-内容：[新闻内容摘要]
-来源：[新闻来源]
-行业：[相关行业]
-关键词：[相关关键词]
+  private extractTag(content: string, tagName: string) {
+    const match = content.match(new RegExp(`<${tagName}[^>]*>([\\s\\S]*?)<\\/${tagName}>`, 'i'))
+    return match?.[1]?.trim() || ''
+  }
 
-示例：
+  private cleanHtml(value: string) {
+    return value
+      .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/gi, '$1')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+  }
 
-标题：人工智能在医疗领域取得重大突破
-内容：近日，AI技术在医疗诊断方面取得重大进展，能够准确识别多种疾病。
-来源：科技日报
-行业：科技、医疗
-关键词：人工智能、医疗、诊断`
-    
+  private decodeHtml(value: string) {
+    return value
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&#x2F;/g, '/')
+      .replace(/&nbsp;/g, ' ')
+  }
+
+  private normalizeLink(link: string) {
+    const trimmed = this.decodeHtml(link).trim()
+    if (!trimmed) {
+      return ''
+    }
+
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+      return trimmed
+    }
+
+    return ''
+  }
+
+  private matchesKeywords(item: RssCandidate, keywords: string[]) {
+    const haystack = `${item.title} ${item.description}`.toLowerCase()
+    return keywords.some((keyword) => haystack.includes(keyword.toLowerCase()))
+  }
+
+  private toArticle(item: RssCandidate, keywords: string[], sourceName: string, index: number): NewsArticle {
+    const matchedKeywords = keywords.filter((keyword) =>
+      `${item.title} ${item.description}`.toLowerCase().includes(keyword.toLowerCase())
+    )
+
+    return {
+      id: `${sourceName.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}-${index}`,
+      title: item.title,
+      content: item.description,
+      source: item.source,
+      url: item.link,
+      publishedAt: item.publishedAt,
+      relatedIndustries: [],
+      relatedKeywords: matchedKeywords.length > 0 ? matchedKeywords : keywords.slice(0, 4),
+    }
+  }
+
+  private dedupeArticles(articles: NewsArticle[]) {
+    const seen = new Set<string>()
+    return articles.filter((article) => {
+      const key = `${article.title}::${article.url}`.toLowerCase()
+      if (seen.has(key)) {
+        return false
+      }
+      seen.add(key)
+      return true
+    })
+  }
+
+  async fetchArticleContent(url: string, fallbackContent: string = ''): Promise<string> {
     try {
-      const response = await fetch(`${baseUrl}/api/generate`, {
-        method: 'POST',
+      const response = await fetch(url, {
         headers: {
-          'Content-Type': 'application/json',
+          'User-Agent': 'Mozilla/5.0 (compatible; AI-Assistant-NewsCrawler/1.0)',
+          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         },
-        body: JSON.stringify({
-          model: modelName,
-          prompt: prompt,
-          stream: false,
-        }),
       })
 
       if (!response.ok) {
-        throw new Error(`Ollama API 调用失败: ${response.status}`)
+        throw new Error(`HTTP ${response.status}`)
       }
 
-      const data = await response.json() as { response?: string }
-      const responseText = data.response || ''
-      
-      // 解析 Ollama 返回的新闻
-      const articles = this.parseOllamaNewsResponse(responseText)
-      if (articles.length === 0) {
-        throw new Error('未解析到有效新闻')
+      const html = await response.text()
+      const normalizedHtml = html
+        .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+        .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+        .replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ')
+
+      const articleScoped =
+        normalizedHtml.match(/<article\b[\s\S]*?<\/article>/i)?.[0] ||
+        normalizedHtml.match(/<main\b[\s\S]*?<\/main>/i)?.[0] ||
+        normalizedHtml
+
+      const paragraphMatches = articleScoped.match(/<p\b[^>]*>([\s\S]*?)<\/p>/gi) || []
+      const paragraphs = paragraphMatches
+        .map((paragraph) => this.decodeHtml(this.cleanHtml(paragraph)))
+        .map((paragraph) => paragraph.trim())
+        .filter((paragraph) => paragraph.length >= 18)
+
+      const articleText = paragraphs.slice(0, 40).join('\n\n').trim()
+
+      if (articleText.length >= 120) {
+        return articleText
       }
-      return articles
+
+      const metaDescription =
+        normalizedHtml.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i)?.[1] ||
+        normalizedHtml.match(/<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)["']/i)?.[1] ||
+        ''
+
+      const cleanedMeta = this.decodeHtml(metaDescription).trim()
+      if (cleanedMeta.length >= 40) {
+        return cleanedMeta
+      }
+
+      return fallbackContent
     } catch (error) {
-      console.error('Ollama API 调用错误:', error)
-      throw error
+      console.warn('抓取新闻原文失败，回退到摘要内容:', error)
+      return fallbackContent
     }
   }
 
-  // 解析 Ollama 返回的新闻
-  private parseOllamaNewsResponse(responseText: string): NewsArticle[] {
-    const articles: NewsArticle[] = []
-    const newsBlocks = responseText.split('\n\n')
-    
-    newsBlocks.forEach((block, index) => {
-      if (block.includes('标题：')) {
-        const lines = block.split('\n')
-        let title = ''
-        let content = ''
-        let source = 'AI 推荐'
-        let industries: string[] = []
-        let keywords: string[] = []
-        
-        lines.forEach(line => {
-          if (line.startsWith('标题：')) {
-            title = line.replace('标题：', '').trim()
-          } else if (line.startsWith('内容：')) {
-            content = line.replace('内容：', '').trim()
-          } else if (line.startsWith('来源：')) {
-            source = line.replace('来源：', '').trim()
-          } else if (line.startsWith('行业：')) {
-            industries = line.replace('行业：', '').split('、').map(item => item.trim())
-          } else if (line.startsWith('关键词：')) {
-            keywords = line.replace('关键词：', '').split('、').map(item => item.trim())
-          }
-        })
-        
-        if (title && content) {
-          articles.push({
-            id: `ollama_${index}_${Date.now()}`,
-            title,
-            content,
-            source,
-            url: `https://example.com/news/ollama_${index}`,
-            publishedAt: new Date().toISOString(),
-            relatedIndustries: industries,
-            relatedKeywords: keywords
-          })
-        }
-      }
-    })
-    
-    return articles
-  }
-
-  // 获取爬取的新闻
   getCrawledNews(): NewsArticle[] {
     return this.crawledArticles
   }
 
-  // 随机获取指定数量的新闻
   getRandomNews(count: number = 6): NewsArticle[] {
     const shuffled = [...this.crawledArticles].sort(() => Math.random() - 0.5)
     return shuffled.slice(0, count)
   }
 
-  // 测试爬虫连接（包括 Ollama 模型连通性）
   async testCrawler(): Promise<{ success: boolean; message: string }> {
     try {
-      // 测试爬虫功能
       const result = await this.crawlNews(undefined, '1', ['人工智能'])
       return {
         success: result.success,
-        message: result.success ? '真实新闻抓取成功' : result.error || '爬虫连接失败'
+        message: result.success ? '公开互联网新闻抓取成功' : result.error || 'AI 爬虫连接失败',
       }
     } catch (error) {
       return {
         success: false,
-        message: error instanceof Error ? error.message : '测试失败'
+        message: error instanceof Error ? error.message : '测试失败',
       }
     }
   }

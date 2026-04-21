@@ -1,5 +1,5 @@
 import type { NewsArticle, SavedNews } from '@/types'
-import { apiRequest } from '@/lib/api'
+import { apiRequest, apiUrl } from '@/lib/api'
 import { getMockNewsArticles, getMockSavedNews } from '@/lib/fallbacks'
 
 export async function getRecentNews(userId: string, forceRefresh: boolean = false) {
@@ -83,6 +83,9 @@ export async function createSavedNews(payload: {
   categories?: string[]
   industries?: string[]
   originalNewsId?: string
+  originalNewsUrl?: string
+  outputType?: 'news' | 'file'
+  fileFormat?: 'md' | 'txt' | 'json' | 'html'
 }) {
   try {
     console.log('开始保存新闻...', payload)
@@ -101,32 +104,30 @@ export async function createSavedNews(payload: {
     return result
   } catch (error) {
     console.error('保存新闻失败:', error)
-    // 出错时返回模拟数据
-    const mockResult = {
-      success: true,
-      message: '保存成功',
-      data: {
-        id: Date.now().toString(),
-        userId: payload.userId,
-        title: payload.title,
-        content: payload.content,
-        categories: payload.categories || [],
-        industries: payload.industries || [],
-        originalNewsId: payload.originalNewsId,
-        url: `https://example.com/news/${Date.now()}`,
-        isPublished: false,
-        publishedTo: [],
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      }
-    }
-    console.log('出错时使用模拟数据:', mockResult)
-    // 更新内存存储
-    if (mockResult.data) {
-      savedNewsMemory.unshift(mockResult.data)
-    }
-    return mockResult
+    throw error
   }
+}
+
+export function downloadSavedFile(news: SavedNews) {
+  if (news.downloadUrl) {
+    const link = document.createElement('a')
+    link.href = apiUrl(news.downloadUrl)
+    link.download = news.fileName || `${news.title}.txt`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    return
+  }
+
+  const blob = new Blob([news.content], { type: 'text/plain;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = news.fileName || `${news.title}.txt`
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
 }
 
 export function updateSavedNews(
@@ -196,18 +197,4 @@ export async function deleteNews(id: string) {
     console.error('删除新闻失败:', error)
     throw error
   }
-}
-
-export function testNewsApi(_payload: {
-  provider: 'newsapi' | 'guardian' | 'nytimes'
-  apiKey: string
-  baseUrl?: string
-}) {
-  return apiRequest<{ success: boolean; message: string }>('/api/news/test-api', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(_payload),
-  })
 }

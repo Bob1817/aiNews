@@ -2,15 +2,26 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.AIController = void 0;
 const AIService_1 = require("../services/AIService");
+const WorkflowExecutionService_1 = require("../services/WorkflowExecutionService");
 class AIController {
     constructor() {
         this.aiService = new AIService_1.AIService();
+        this.workflowExecutionService = new WorkflowExecutionService_1.WorkflowExecutionService();
     }
     // AI 对话
     async chat(req, res) {
         try {
             const { userId, message, referencedNewsId, history } = req.body;
-            const response = await this.aiService.chat(userId, message, referencedNewsId, history);
+            const parsed = await this.workflowExecutionService.parseCommand(message);
+            const response = parsed.matched
+                ? await this.workflowExecutionService.executeParsedCommand({
+                    userId,
+                    parsed,
+                    message,
+                    referencedNewsId,
+                    history,
+                })
+                : await this.aiService.chat(userId, message, referencedNewsId, history);
             res.json(response);
         }
         catch (error) {

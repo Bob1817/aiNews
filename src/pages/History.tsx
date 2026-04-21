@@ -45,40 +45,29 @@ export function History() {
   }
 
   return (
-    <div className="h-full overflow-y-auto bg-[linear-gradient(180deg,#f8fafc_0%,#eef2ff_100%)]">
+    <div className="h-full overflow-y-auto bg-transparent">
       <div className="mx-auto flex min-h-full w-full max-w-[1500px] flex-col gap-6 px-6 py-6 lg:px-10">
-        <section className="rounded-[32px] border border-slate-200 bg-white/95 p-8 shadow-[0_30px_80px_rgba(15,23,42,0.08)]">
+        <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_16px_36px_rgba(15,23,42,0.06)]">
           <div className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
-            <div className="max-w-3xl">
-              <p className="text-xs font-semibold uppercase tracking-[0.28em] text-sky-600">
-                Task History
-              </p>
-              <h1 className="mt-3 font-display text-3xl text-slate-900 md:text-4xl">
-                任务历史
-              </h1>
-              <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600 md:text-base">
-                这里会自动记录每次从“新建任务”开启的对话。点击任意记录，就能回到对应任务继续推进，不需要重新描述上下文。
+            <div className="max-w-2xl">
+              <h1 className="text-2xl font-semibold text-slate-900 md:text-3xl">任务历史</h1>
+              <p className="mt-2 text-sm text-slate-600">
+                打开已有对话，继续处理任务。
               </p>
             </div>
 
-            <button
-              onClick={handleCreateTask}
-              className="focus-ring inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-5 py-3 text-sm font-medium text-white transition hover:bg-slate-800"
-            >
-              <MessageSquarePlus className="h-4 w-4" />
-              新建任务
-            </button>
+
           </div>
         </section>
 
         {conversationHistories.length === 0 ? (
-          <section className="flex min-h-[420px] flex-col items-center justify-center rounded-[32px] border border-dashed border-slate-300 bg-white/80 px-6 text-center shadow-[0_24px_60px_rgba(15,23,42,0.04)]">
-            <div className="flex h-20 w-20 items-center justify-center rounded-[24px] bg-slate-100">
-              <Clock className="h-10 w-10 text-slate-400" />
+          <section className="flex min-h-[360px] flex-col items-center justify-center rounded-[24px] border border-dashed border-slate-300 bg-white px-6 text-center shadow-[0_16px_36px_rgba(15,23,42,0.04)]">
+            <div className="flex h-16 w-16 items-center justify-center rounded-[20px] bg-slate-100">
+              <Clock className="h-8 w-8 text-slate-400" />
             </div>
-            <h2 className="mt-6 text-xl font-semibold text-slate-900">还没有任务历史</h2>
-            <p className="mt-2 max-w-md text-sm leading-7 text-slate-500">
-              从左侧“新建任务”发起一次对话后，系统会自动创建任务记录并在后续对话中持续更新。
+            <h2 className="mt-5 text-xl font-semibold text-slate-900">还没有任务历史</h2>
+            <p className="mt-2 max-w-sm text-sm leading-6 text-slate-500">
+              新建一次任务后会自动生成记录。
             </p>
           </section>
         ) : (
@@ -86,7 +75,7 @@ export function History() {
             {conversationHistories.map((history) => (
               <article
                 key={history.id}
-                className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_22px_55px_rgba(15,23,42,0.05)] transition hover:-translate-y-0.5 hover:shadow-[0_28px_70px_rgba(15,23,42,0.08)]"
+                className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-[0_16px_36px_rgba(15,23,42,0.05)] transition hover:border-slate-300"
               >
                 <div className="flex items-start justify-between gap-4">
                   <button
@@ -94,11 +83,11 @@ export function History() {
                     className="flex-1 text-left"
                   >
                     <p className="text-lg font-semibold text-slate-900">{history.title}</p>
-                    <p className="mt-2 text-sm leading-7 text-slate-500">
+                    <p className="mt-2 text-sm text-slate-500">
                       {history.messages.length} 条消息 · 最近更新于{' '}
                       {new Date(history.updatedAt).toLocaleString('zh-CN')}
                     </p>
-                    <p className="mt-4 line-clamp-2 text-sm leading-7 text-slate-600">
+                    <p className="mt-3 line-clamp-2 text-sm leading-6 text-slate-600">
                       {history.messages
                         .slice(-1)[0]
                         ?.content?.slice(0, 120) || '当前记录暂无可预览内容。'}

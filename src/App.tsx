@@ -23,7 +23,7 @@ function App() {
 
   if (!authenticated) {
     return (
-      <Router>
+      <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
@@ -34,7 +34,7 @@ function App() {
   }
 
   return (
-    <Router>
+    <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <div className="app-shell flex h-screen overflow-hidden text-editorial-ink">
         <Sidebar />
         <div className="relative flex-1 overflow-hidden bg-transparent">

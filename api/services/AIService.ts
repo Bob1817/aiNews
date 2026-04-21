@@ -2,6 +2,7 @@ import { readFile, readdir, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { NewsService } from './NewsService'
 import { ConfigService } from './ConfigService'
+import { buildBoundedHistorySection, buildBoundedReferenceSection, clampContextBlock } from './chatContext'
 
 interface AIConfig {
   provider: 'openai' | 'anthropic' | 'google' | 'ollama' | 'llamacpp'
@@ -29,6 +30,33 @@ export class AIService {
     }
 
     return Boolean(config.apiKey && config.modelName)
+  }
+
+  private prefersFallbackModel(primary: AIConfig, fallback?: AIConfig) {
+    if (!fallback || !this.isUsableConfig(fallback)) {
+      return false
+    }
+
+    if (primary.provider !== fallback.provider) {
+      return false
+    }
+
+    if ((primary.provider === 'ollama' || primary.provider === 'llamacpp') && !primary.modelName && !!fallback.modelName) {
+      return true
+    }
+
+    return false
+  }
+
+  private buildOllamaBaseUrlCandidates(baseUrl?: string) {
+    const normalized = (baseUrl || 'http://localhost:11434').replace(/\/$/, '')
+    const candidates = [normalized]
+
+    if (normalized.includes('://localhost')) {
+      candidates.push(normalized.replace('://localhost', '://127.0.0.1'))
+    }
+
+    return Array.from(new Set(candidates))
   }
 
   private readonly workspaceTextExtensions = new Set([
@@ -164,27 +192,27 @@ export class AIService {
       return config.modelName.trim()
     }
 
-    const baseUrl = (config.baseUrl || 'http://localhost:11434').replace(/\/$/, '')
+    for (const baseUrl of this.buildOllamaBaseUrlCandidates(config.baseUrl)) {
+      try {
+        const response = await fetch(`${baseUrl}/api/tags`, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        })
 
-    try {
-      const response = await fetch(`${baseUrl}/api/tags`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      })
+        if (response.ok) {
+          const data = await response.json() as { models?: Array<{ name?: string; model?: string }> }
+          const firstModel = data.models?.[0]
+          const resolved = firstModel?.model || firstModel?.name
 
-      if (response.ok) {
-        const data = await response.json() as { models?: Array<{ name?: string; model?: string }> }
-        const firstModel = data.models?.[0]
-        const resolved = firstModel?.model || firstModel?.name
-
-        if (resolved) {
-          return resolved
+          if (resolved) {
+            return resolved
+          }
         }
+      } catch (error) {
+        console.warn(`自动解析 Ollama 模型失败 (${baseUrl}):`, error)
       }
-    } catch (error) {
-      console.warn('自动解析 Ollama 模型失败:', error)
     }
 
     return process.env.OLLAMA_MODEL || 'gemma4:latest'
@@ -192,38 +220,68 @@ export class AIService {
 
   // 调用 Ollama API
   private async callOllamaAPI(config: AIConfig, prompt: string, systemPrompt?: string): Promise<string> {
-    const baseUrl = (config.baseUrl || 'http://localhost:11434').replace(/\/$/, '')
     const modelName = await this.resolveOllamaModelName(config)
     
     try {
-      const response = await fetch(`${baseUrl}/api/generate`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: modelName,
-          prompt: systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt,
-          stream: false,
-        }),
-      })
+      const promptContent = systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt
+      let lastError: Error | null = null
 
-      if (!response.ok) {
-        const contentType = response.headers.get('content-type') || ''
-        const isJson = contentType.includes('application/json')
-        const data = isJson ? await response.json() : await response.text()
-        const message =
-          typeof data === 'object' && data !== null && 'error' in data
-            ? String(data.error)
-            : `Ollama API 调用失败: ${response.status}`
-        throw new Error(message)
+      for (const baseUrl of this.buildOllamaBaseUrlCandidates(config.baseUrl)) {
+        try {
+          let response = await fetch(`${baseUrl}/api/generate`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              model: modelName,
+              prompt: promptContent,
+              stream: false,
+            }),
+          })
+
+          if (response.status === 404) {
+            response = await fetch(`${baseUrl}/api/chat`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                model: modelName,
+                messages: [{ role: 'user', content: promptContent }],
+                stream: false,
+              }),
+            })
+          }
+
+          if (!response.ok) {
+            const contentType = response.headers.get('content-type') || ''
+            const isJson = contentType.includes('application/json')
+            const data = isJson ? await response.json() : await response.text()
+            const message =
+              typeof data === 'object' && data !== null && 'error' in data
+                ? String(data.error)
+                : `Ollama API 调用失败: ${response.status}`
+
+            throw new Error(message)
+          }
+
+          const data = await response.json() as {
+            response?: string
+            message?: { content?: string }
+          }
+          return data.response || data.message?.content || '抱歉，未能生成回复。'
+        } catch (error) {
+          lastError = error instanceof Error ? error : new Error('未知错误')
+          console.warn(`Ollama API 调用失败 (${baseUrl}):`, lastError)
+        }
       }
 
-      const data = await response.json() as { response?: string }
-      return data.response || '抱歉，未能生成回复。'
+      throw lastError || new Error('未能连接到 Ollama 服务')
     } catch (error) {
       console.error('Ollama API 调用错误:', error)
-      throw new Error('调用 Ollama API 失败，请检查 Ollama 是否正在运行')
+      const message = error instanceof Error ? error.message : '未知错误'
+      throw new Error(`调用 Ollama API 失败：${message}`)
     }
   }
 
@@ -333,10 +391,6 @@ export class AIService {
         baseUrl: config.aiModel.baseUrl,
       }
 
-      if (this.isUsableConfig(primaryConfig)) {
-        return primaryConfig
-      }
-
       const activeModel = config.aiModels?.find((item) => item.isActive) || config.aiModels?.[0]
       const fallbackConfig: AIConfig | undefined = activeModel
         ? {
@@ -346,6 +400,14 @@ export class AIService {
             baseUrl: activeModel.baseUrl,
           }
         : undefined
+
+      if (this.prefersFallbackModel(primaryConfig, fallbackConfig)) {
+        return fallbackConfig as AIConfig
+      }
+
+      if (this.isUsableConfig(primaryConfig)) {
+        return primaryConfig
+      }
 
       if (this.isUsableConfig(fallbackConfig)) {
         return fallbackConfig
@@ -398,24 +460,32 @@ export class AIService {
     if (referencedNewsId) {
       const news = await this.newsService.getNewsById(referencedNewsId)
       if (news) {
-        fullPrompt = `请基于以下新闻内容完成用户任务：\n\n新闻标题：${news.title}\n\n新闻内容：${news.content}\n\n用户请求：${message}`
+        const boundedReference = buildBoundedReferenceSection(
+          {
+            title: news.title,
+            content: news.content,
+            source: news.source,
+            publishedAt: news.publishedAt,
+            url: news.url,
+          },
+          1200
+        )
+        fullPrompt = `请基于以下新闻内容完成用户任务：\n\n${boundedReference}\n\n用户请求：${clampContextBlock(message, 1000)}`
       }
     }
 
-    const historySection =
-      history && history.length > 0
-        ? `最近对话记录：\n${history
-            .slice(-6)
-            .map((item) => `${item.role === 'user' ? '用户' : '助手'}：${item.content}`)
-            .join('\n')}\n\n`
-        : ''
+    const historySection = buildBoundedHistorySection(history || [], {
+      preserveRecentMessages: 8,
+      maxMessageChars: 320,
+      maxSummaryChars: 360,
+    })
 
     const workspaceSection = await this.buildWorkspaceContext(userId)
-    const workspacePrompt = workspaceSection ? `${workspaceSection}\n\n` : ''
+    const workspacePrompt = workspaceSection ? `${clampContextBlock(workspaceSection, 1800)}\n\n` : ''
 
     const content = await this.generateText(
       userId,
-      `${workspacePrompt}${historySection}${fullPrompt}`,
+      `${workspacePrompt}${historySection}${clampContextBlock(fullPrompt, 1800)}`,
       '你是 AI 助手的通用对话核心，擅长帮助用户处理日常工作任务。若工程文件夹上下文存在，请优先参考其中的文件结构和内容摘要来回答。回答要直接、清晰、可执行。'
     )
 

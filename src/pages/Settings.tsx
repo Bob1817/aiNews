@@ -20,14 +20,14 @@ function SectionCard({
   children: ReactNode
 }) {
   return (
-    <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_45px_rgba(15,23,42,0.06)]">
-      <div className="mb-5 flex items-start gap-4">
-        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
+    <section className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-[0_14px_32px_rgba(15,23,42,0.05)]">
+      <div className="mb-4 flex items-start gap-3">
+        <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
           {icon}
         </div>
         <div>
-          <h2 className="text-xl font-semibold text-slate-900">{title}</h2>
-          <p className="mt-1 text-sm leading-6 text-editorial-muted">{description}</p>
+          <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
+          <p className="mt-1 text-sm text-editorial-muted">{description}</p>
         </div>
       </div>
       {children}
@@ -241,7 +241,7 @@ export function Settings() {
 
   return (
     <div className="flex h-full flex-col bg-transparent">
-      <div className="border-b border-slate-200 bg-white px-6 py-5">
+      <div className="border-b border-slate-200 bg-white px-6 py-4">
         <div className="mx-auto flex w-full max-w-6xl items-center gap-4">
           <Link
             to="/chat"
@@ -251,19 +251,15 @@ export function Settings() {
             返回
           </Link>
           <div className="flex-1">
-            <span className="eyebrow">Workspace Preferences</span>
-            <h1 className="mt-3 text-3xl font-semibold text-slate-900">用户设置</h1>
-            <p className="mt-2 text-sm leading-6 text-editorial-muted">
-              配置你的关注行业、关键词和内容分类，让新闻推送等工作流更贴合日常办公需求。
-            </p>
+            <h1 className="text-2xl font-semibold text-slate-900">用户设置</h1>
           </div>
           <button
             onClick={handleSave}
             disabled={isSaving}
-            className="focus-ring flex items-center gap-2 rounded-2xl bg-gradient-to-r from-editorial-violet to-editorial-cyan px-5 py-3 text-white transition-transform hover:-translate-y-0.5 disabled:opacity-60"
+            className="focus-ring flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-3 text-white transition-colors hover:bg-slate-800 disabled:opacity-60"
           >
             <Save className="h-4 w-4" />
-            {isSaving ? '保存中...' : '保存设置'}
+            {isSaving ? '保存中...' : '保存'}
           </button>
         </div>
       </div>
@@ -274,7 +270,7 @@ export function Settings() {
             <SectionCard
               icon={<Briefcase className="h-5 w-5" />}
               title="关注行业"
-              description="这些行业会直接影响新闻推送等工作流的抓取方向。建议填写与你日常工作最相关的领域。"
+              description="影响推荐与推送。"
             >
               <div className="mb-4 flex flex-col gap-3 sm:flex-row">
                 <input
@@ -303,7 +299,7 @@ export function Settings() {
             <SectionCard
               icon={<Sparkles className="h-5 w-5" />}
               title="关键词设置"
-              description="关键词会作为新闻推送、话题发现和后续扩展工作流的重要输入，建议尽量具体。"
+              description="影响检索与命中。"
             >
               <div className="mb-4 flex flex-col gap-3 sm:flex-row">
                 <input

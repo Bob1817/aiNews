@@ -1,9 +1,17 @@
+import { mkdir, writeFile } from 'node:fs/promises'
+import path from 'node:path'
 import { SavedNews } from '../../shared/types'
+import { AICrawlerService } from './AICrawlerService'
+import { ConfigService } from './ConfigService'
 
 export class SavedNewsService {
   private static savedNews: SavedNews[] = []
+  private configService: ConfigService
+  private aiCrawlerService: AICrawlerService
 
   constructor() {
+    this.configService = new ConfigService()
+    this.aiCrawlerService = new AICrawlerService()
     // 初始化一些模拟数据
     if (SavedNewsService.savedNews.length === 0) {
       this.initializeMockData()
@@ -18,6 +26,7 @@ export class SavedNewsService {
         title: 'AI 医疗诊断技术引领行业变革',
         content: '在当今快速发展的科技领域，人工智能技术正在医疗行业掀起一场革命性的变革...',
         originalNewsId: '1',
+        outputType: 'news',
         isPublished: true,
         publishedTo: ['website'],
         createdAt: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
@@ -29,12 +38,55 @@ export class SavedNewsService {
         title: '新能源汽车市场分析报告',
         content: '随着全球环保意识的提升和政策支持，新能源汽车市场正在经历爆发式增长...',
         originalNewsId: '2',
+        outputType: 'news',
         isPublished: false,
         publishedTo: [],
         createdAt: new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString(),
         updatedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
       },
     ]
+  }
+
+  private sanitizeFileName(name: string) {
+    return name.replace(/[<>:"/\\|?*\u0000-\u001F]/g, '_').replace(/\s+/g, ' ').trim() || 'AI助手输出'
+  }
+
+  private buildFileContent(title: string, content: string, format: 'md' | 'txt' | 'json' | 'html') {
+    switch (format) {
+      case 'txt':
+        return `${title}\n\n${content.replace(/[#*`]/g, '')}`
+      case 'json':
+        return JSON.stringify(
+          {
+            title,
+            content,
+            exportedAt: new Date().toISOString(),
+          },
+          null,
+          2
+        )
+      case 'html':
+        return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>${title}</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif; margin: 32px; color: #0f172a; line-height: 1.7; }
+    h1 { margin-bottom: 20px; }
+    .meta { margin-top: 24px; color: #64748b; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <h1>${title}</h1>
+  <article>${content.replace(/\n/g, '<br />')}</article>
+  <p class="meta">由 AI 助手生成于 ${new Date().toLocaleString('zh-CN')}</p>
+</body>
+</html>`
+      case 'md':
+      default:
+        return `# ${title}\n\n${content}`
+    }
   }
 
   // 获取保存的新闻
@@ -48,21 +100,53 @@ export class SavedNewsService {
     title: string
     content: string
     originalNewsId?: string
+    originalNewsUrl?: string
     categories?: string[]
     industries?: string[]
+    outputType?: 'news' | 'file'
+    fileFormat?: 'md' | 'txt' | 'json' | 'html'
   }): Promise<SavedNews> {
+    const id = Date.now().toString()
+    const outputType = data.outputType || 'news'
+    const resolvedContent =
+      outputType === 'news' && data.originalNewsUrl
+        ? await this.aiCrawlerService.fetchArticleContent(data.originalNewsUrl, data.content)
+        : data.content
     const newNews: SavedNews = {
-      id: Date.now().toString(),
+      id,
       userId: data.userId,
       title: data.title,
-      content: data.content,
+      content: resolvedContent,
       originalNewsId: data.originalNewsId,
+      url: data.originalNewsUrl,
+      outputType,
       isPublished: false,
       publishedTo: [],
       categories: data.categories || [],
       industries: data.industries || [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
+    }
+
+    if (outputType === 'file') {
+      const fileFormat = data.fileFormat || 'md'
+      const config = await this.configService.getConfig(data.userId)
+      const generatedDir = path.join(config.workspace.rootPath, 'generated')
+      const safeTitle = this.sanitizeFileName(data.title)
+      const fileName = `${safeTitle}-${id}.${fileFormat}`
+      const filePath = path.join(generatedDir, fileName)
+
+      await mkdir(generatedDir, { recursive: true })
+      await writeFile(
+        filePath,
+        this.buildFileContent(data.title, data.content, fileFormat),
+        'utf-8'
+      )
+
+      newNews.fileName = fileName
+      newNews.fileFormat = fileFormat
+      newNews.filePath = filePath
+      newNews.downloadUrl = `/api/news/saved/${id}/download`
     }
 
     SavedNewsService.savedNews.push(newNews)

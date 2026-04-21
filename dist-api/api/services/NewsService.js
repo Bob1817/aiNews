@@ -63,7 +63,7 @@ class NewsService {
         // 返回所有新闻，或者最多6条
         return NewsService.newsArticles.slice(0, 6);
     }
-    // 更新新闻源
+    // 更新新闻抓取结果
     async updateNewsFeeds(userId, userProfile) {
         console.log('Updating news feeds...');
         try {
@@ -71,28 +71,12 @@ class NewsService {
             await this.aiCrawlerService.crawlNews(userProfile, userId);
         }
         catch (error) {
-            console.error('更新新闻源失败:', error);
+            console.error('更新新闻抓取结果失败:', error);
         }
     }
     // 根据 ID 获取新闻
     async getNewsById(id) {
         return NewsService.newsArticles.find((news) => news.id === id) || null;
-    }
-    // 测试爬虫连接
-    async testNewsAPI(_config) {
-        try {
-            return await this.aiCrawlerService.testCrawler();
-        }
-        catch (error) {
-            const message = error instanceof Error
-                ? `连接失败: ${error.message}`
-                : '连接失败: 未知错误';
-            return { success: false, message };
-        }
-    }
-    // 获取支持的新闻源列表
-    getSupportedProviders() {
-        return ['AI 爬虫'];
     }
 }
 exports.NewsService = NewsService;

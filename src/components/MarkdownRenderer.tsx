@@ -7,6 +7,7 @@ interface MarkdownRendererProps {
   maxLines?: number
   showFullContent?: boolean
   onCommandClick?: (command: string) => void
+  onActionClick?: (action: string) => void
 }
 
 export function MarkdownRenderer({
@@ -15,6 +16,7 @@ export function MarkdownRenderer({
   maxLines,
   showFullContent = false,
   onCommandClick,
+  onActionClick,
 }: MarkdownRendererProps) {
   let displayContent = content || ''
   if (maxLines && !showFullContent) {
@@ -28,27 +30,34 @@ export function MarkdownRenderer({
     <div className={`markdown-content ${className}`}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
+        urlTransform={(url) => {
+          if (url.startsWith('command:') || url.startsWith('action:')) {
+            return url
+          }
+
+          return url
+        }}
         components={{
           h1: ({ ...props }) => (
-            <h1 className="text-2xl font-bold mt-6 mb-4 text-gray-900" {...props} />
+            <h1 className="mb-3 mt-5 text-xl font-semibold text-slate-900" {...props} />
           ),
           h2: ({ ...props }) => (
-            <h2 className="text-xl font-bold mt-5 mb-3 text-gray-800" {...props} />
+            <h2 className="mb-3 mt-5 text-lg font-semibold text-slate-900" {...props} />
           ),
           h3: ({ ...props }) => (
-            <h3 className="text-lg font-semibold mt-4 mb-2 text-gray-700" {...props} />
+            <h3 className="mb-2 mt-4 text-base font-semibold text-slate-900" {...props} />
           ),
           h4: ({ ...props }) => (
-            <h4 className="text-base font-semibold mt-3 mb-2 text-gray-700" {...props} />
+            <h4 className="mb-2 mt-3 text-sm font-semibold text-slate-900" {...props} />
           ),
           p: ({ ...props }) => (
-            <p className="my-3 leading-relaxed text-gray-700" {...props} />
+            <p className="my-2.5 leading-7 text-slate-700" {...props} />
           ),
           ul: ({ ...props }) => (
-            <ul className="my-3 ml-5 list-disc space-y-1 text-gray-700" {...props} />
+            <ul className="my-3 ml-5 list-disc space-y-1.5 text-slate-700" {...props} />
           ),
           ol: ({ ...props }) => (
-            <ol className="my-3 ml-5 list-decimal space-y-1 text-gray-700" {...props} />
+            <ol className="my-3 ml-5 list-decimal space-y-1.5 text-slate-700" {...props} />
           ),
           li: ({ ...props }) => (
             <li className="my-1" {...props} />
@@ -60,8 +69,30 @@ export function MarkdownRenderer({
               return (
                 <button
                   type="button"
-                  className="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-sm text-blue-700 transition hover:bg-blue-100"
-                  onClick={() => onCommandClick?.(command)}
+                  className="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-sm text-blue-700 transition-colors hover:bg-blue-100"
+                  onClick={(event) => {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    onCommandClick?.(command)
+                  }}
+                >
+                  {children}
+                </button>
+              )
+            }
+
+            if (href?.startsWith('action:')) {
+              const action = href.replace(/^action:/, '')
+
+              return (
+                <button
+                  type="button"
+                  className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-sm text-slate-700 transition-colors hover:bg-slate-100"
+                  onClick={(event) => {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    onActionClick?.(action)
+                  }}
                 >
                   {children}
                 </button>
@@ -70,7 +101,7 @@ export function MarkdownRenderer({
 
             return (
               <a
-                className="text-blue-600 hover:text-blue-800 underline underline-offset-2"
+                className="text-blue-600 underline underline-offset-2 transition-colors hover:text-blue-700"
                 target="_blank"
                 rel="noopener noreferrer"
                 href={href}
@@ -86,7 +117,7 @@ export function MarkdownRenderer({
             if (isInline) {
               return (
                 <code
-                  className="px-1.5 py-0.5 bg-gray-100 text-gray-800 rounded text-sm font-mono"
+                  className="rounded bg-slate-100 px-1.5 py-0.5 text-[0.92em] text-slate-800"
                   {...props}
                 >
                   {children}
@@ -94,7 +125,7 @@ export function MarkdownRenderer({
               )
             }
             return (
-              <pre className="p-4 bg-gray-900 text-gray-100 rounded-lg overflow-x-auto text-sm font-mono">
+              <pre className="overflow-x-auto rounded-2xl border border-slate-200 bg-slate-950 p-4 text-sm text-slate-100">
                 <code className={codeClassName} {...props}>
                   {children}
                 </code>
@@ -103,29 +134,29 @@ export function MarkdownRenderer({
           },
           blockquote: ({ ...props }) => (
             <blockquote
-              className="border-l-4 border-blue-300 pl-4 py-2 my-4 bg-blue-50 text-gray-700 italic"
+              className="my-4 rounded-r-2xl border-l-2 border-blue-300 bg-slate-50 py-2 pl-4 text-slate-600"
               {...props}
             />
           ),
           table: ({ ...props }) => (
             <div className="overflow-x-auto my-4">
-              <table className="min-w-full border-collapse border border-gray-300" {...props} />
+              <table className="min-w-full border-collapse border border-slate-200" {...props} />
             </div>
           ),
           thead: ({ ...props }) => (
-            <thead className="bg-gray-100" {...props} />
+            <thead className="bg-slate-50" {...props} />
           ),
           th: ({ ...props }) => (
-            <th className="border border-gray-300 px-4 py-2 text-left font-semibold text-gray-700" {...props} />
+            <th className="border border-slate-200 px-4 py-2 text-left font-semibold text-slate-700" {...props} />
           ),
           td: ({ ...props }) => (
-            <td className="border border-gray-300 px-4 py-2 text-gray-700" {...props} />
+            <td className="border border-slate-200 px-4 py-2 text-slate-700" {...props} />
           ),
           hr: ({ ...props }) => (
-            <hr className="my-6 border-gray-300" {...props} />
+            <hr className="my-5 border-slate-200" {...props} />
           ),
           strong: ({ ...props }) => (
-            <strong className="font-semibold text-gray-900" {...props} />
+            <strong className="font-semibold text-slate-900" {...props} />
           ),
           em: ({ ...props }) => (
             <em className="italic" {...props} />

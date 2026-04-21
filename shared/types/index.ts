@@ -15,6 +15,12 @@ export interface SavedNews {
   title: string
   content: string
   originalNewsId?: string
+  url?: string
+  outputType?: 'news' | 'file'
+  fileName?: string
+  fileFormat?: 'md' | 'txt' | 'json' | 'html'
+  filePath?: string
+  downloadUrl?: string
   isPublished: boolean
   publishedTo: string[]
   categories?: string[]
@@ -72,11 +78,6 @@ export interface UserConfig {
     baseUrl?: string
   }
   aiModels: AIModelConfig[]
-  newsAPI?: {
-    provider: 'newsapi' | 'guardian' | 'nytimes'
-    apiKey: string
-    baseUrl?: string
-  }
   publishPlatforms: {
     website?: {
       apiUrl: string

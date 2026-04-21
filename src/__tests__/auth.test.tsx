@@ -32,7 +32,7 @@ describe('认证功能测试', () => {
       expect(screen.getByRole('heading', { name: /登录/i })).toBeInTheDocument()
       expect(screen.getByPlaceholderText('请输入邮箱')).toBeInTheDocument()
       expect(screen.getByPlaceholderText('请输入密码')).toBeInTheDocument()
-      expect(screen.getByRole('button', { name: /登录账号/i })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /^登录$/i })).toBeInTheDocument()
       expect(screen.getByText(/^注册$/)).toBeInTheDocument()
     })
 
@@ -59,7 +59,7 @@ describe('认证功能测试', () => {
       })
       
       // 提交表单
-      fireEvent.click(screen.getByRole('button', { name: /登录账号/i }))
+      fireEvent.click(screen.getByRole('button', { name: /^登录$/i }))
       
       // 验证登录函数被调用
       await waitFor(() => {
@@ -90,7 +90,7 @@ describe('认证功能测试', () => {
       })
       
       // 提交表单
-      fireEvent.click(screen.getByRole('button', { name: /登录账号/i }))
+      fireEvent.click(screen.getByRole('button', { name: /^登录$/i }))
       
       // 验证错误消息显示
       await waitFor(() => {

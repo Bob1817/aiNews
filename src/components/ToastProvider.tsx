@@ -29,11 +29,11 @@ function getToastIcon(variant: ToastVariant) {
 function getToastStyles(variant: ToastVariant) {
   switch (variant) {
     case 'success':
-      return 'border-green-200 bg-green-50 text-green-900'
+      return 'border-green-200 bg-white text-slate-900'
     case 'error':
-      return 'border-red-200 bg-red-50 text-red-900'
+      return 'border-red-200 bg-white text-slate-900'
     default:
-      return 'border-blue-200 bg-blue-50 text-blue-900'
+      return 'border-blue-200 bg-white text-slate-900'
   }
 }
 
@@ -76,25 +76,31 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   return (
     <ToastContext.Provider value={value}>
       {children}
-      <div className="pointer-events-none fixed right-4 top-4 z-[100] flex w-[min(360px,calc(100vw-2rem))] flex-col gap-3">
+      <div className="pointer-events-none fixed right-4 top-4 z-[100] flex w-[min(340px,calc(100vw-2rem))] flex-col gap-2.5">
         {toasts.map((toast) => {
           const Icon = getToastIcon(toast.variant)
 
           return (
             <div
               key={toast.id}
-              className={`pointer-events-auto rounded-2xl border p-4 shadow-lg backdrop-blur-sm ${getToastStyles(toast.variant)}`}
+              className={`pointer-events-auto rounded-2xl border px-4 py-3 shadow-[0_14px_32px_rgba(15,23,42,0.08)] backdrop-blur-sm ${getToastStyles(toast.variant)}`}
             >
               <div className="flex items-start gap-3">
-                <Icon className="mt-0.5 h-5 w-5 shrink-0" />
+                <Icon className={`mt-0.5 h-4.5 w-4.5 shrink-0 ${
+                  toast.variant === 'success'
+                    ? 'text-green-600'
+                    : toast.variant === 'error'
+                      ? 'text-red-600'
+                      : 'text-blue-600'
+                }`} />
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-semibold">{toast.title}</p>
-                  {toast.message && <p className="mt-1 text-sm opacity-80">{toast.message}</p>}
+                  {toast.message && <p className="mt-1 text-sm text-slate-500">{toast.message}</p>}
                 </div>
                 <button
                   type="button"
                   onClick={() => removeToast(toast.id)}
-                  className="rounded-md p-1 opacity-60 transition-opacity hover:opacity-100"
+                  className="rounded-md p-1 text-slate-400 transition-colors hover:bg-slate-50 hover:text-slate-600"
                   aria-label="关闭提示"
                 >
                   <X className="h-4 w-4" />

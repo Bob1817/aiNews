@@ -1,20 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Bot, Command, Send, Server, Settings, Workflow } from 'lucide-react'
+import { Bot, ChevronDown, FileImage, FileText, FolderOpen, Newspaper, Plus, Send, Server, Settings, Workflow } from 'lucide-react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { ConversationItem } from '@/components/ConversationItem'
 import { useToast } from '@/lib/toast'
 import { useAppStore } from '@/store'
 import type {
   ActiveAIModelInfo,
+  AIModelConfig,
   ConversationHistory,
   ConversationMessage,
+  NewsArticle,
   SavedNews,
+  UserConfig,
   WorkflowDefinition,
 } from '@/types'
 import { chat as chatWithAi } from '@/lib/api/chat'
 import { getErrorMessage } from '@/lib/errors'
 import { createSavedNews } from '@/lib/api/news'
-import { getActiveAIModel, getConfig } from '@/lib/api/config'
+import { getConfig, switchAIModel, updateConfig, uploadWorkspaceAsset } from '@/lib/api/config'
 import { parseWorkflowCommand, getWorkflowExecutions, getWorkflows } from '@/lib/api/workflows'
 
 const thinkingMessages = [
@@ -24,7 +27,7 @@ const thinkingMessages = [
 ] as const
 
 function isModelReady(model?: {
-  provider?: string
+  provider?: string | null
   apiKey?: string
   modelName?: string
   baseUrl?: string
@@ -40,7 +43,76 @@ function isModelReady(model?: {
   return Boolean(model.apiKey && model.modelName)
 }
 
+function buildActiveModelInfo(config: {
+  aiModel: {
+    name?: string
+    provider?: ActiveAIModelInfo['provider']
+    modelName?: string
+    baseUrl?: string
+  }
+  aiModels: Array<{
+    name?: string
+    provider?: ActiveAIModelInfo['provider']
+    modelName?: string
+    baseUrl?: string
+    isActive?: boolean
+  }>
+}): ActiveAIModelInfo | null {
+  const primaryReady = isModelReady(config.aiModel)
+  const fallbackModel = config.aiModels?.find((item) => item.isActive) || config.aiModels?.[0]
+  const fallbackReady = isModelReady(fallbackModel)
+  const selectedModel = primaryReady ? config.aiModel : fallbackReady ? fallbackModel : null
+
+  if (!selectedModel?.provider) {
+    return null
+  }
+
+  return {
+    configured: true,
+    provider: selectedModel.provider,
+    configuredName: selectedModel.name || '',
+    configuredModelName: selectedModel.modelName || '',
+    effectiveModelName: selectedModel.modelName || selectedModel.name || '',
+    baseUrl: selectedModel.baseUrl || '',
+    source: primaryReady ? 'primary' : 'fallback',
+  }
+}
+
+function getPathLeafLabel(filePath?: string) {
+  if (!filePath) {
+    return '未设置目录'
+  }
+
+  const normalized = filePath.replace(/[\\]+/g, '/').replace(/\/$/, '')
+  const segments = normalized.split('/')
+  return segments[segments.length - 1] || filePath
+}
+
+function clampChatText(value: string, maxChars: number) {
+  const normalized = value.replace(/\r/g, '').replace(/\n{3,}/g, '\n\n').trim()
+  if (normalized.length <= maxChars) {
+    return normalized
+  }
+
+  return `${normalized.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`
+}
+
 export function Chat() {
+  type QueuedSubmission = {
+    id: string
+    rawMessage: string
+    requestMessage: string
+    workflow: WorkflowDefinition | null
+    referencedNews?: NewsArticle | null
+    createdAt: string
+  }
+
+  type UploadedAsset = {
+    fileName: string
+    relativePath: string
+    mimeType: string
+  }
+
   const location = useLocation()
   const navigate = useNavigate()
   const { conversationId } = useParams<{ conversationId?: string }>()
@@ -51,6 +123,19 @@ export function Chat() {
   const [showWorkflowSuggestions, setShowWorkflowSuggestions] = useState(false)
   const [thinkingStep, setThinkingStep] = useState(0)
   const [activeAiModel, setActiveAiModel] = useState<ActiveAIModelInfo | null>(null)
+  const [pendingSaveContent, setPendingSaveContent] = useState<string | null>(null)
+  const [saveTargetType, setSaveTargetType] = useState<'news' | 'file'>('news')
+  const [saveFileFormat, setSaveFileFormat] = useState<'md' | 'txt' | 'json' | 'html'>('md')
+  const [queuedSubmissions, setQueuedSubmissions] = useState<QueuedSubmission[]>([])
+  const [quotedNews, setQuotedNews] = useState<NewsArticle | null>(null)
+  const [referencedNewsMap, setReferencedNewsMap] = useState<Record<string, NewsArticle>>({})
+  const [configSnapshot, setConfigSnapshot] = useState<UserConfig | null>(null)
+  const [showActionMenu, setShowActionMenu] = useState(false)
+  const [showModelMenu, setShowModelMenu] = useState(false)
+  const [isSwitchingModel, setIsSwitchingModel] = useState(false)
+  const [isUpdatingWorkspace, setIsUpdatingWorkspace] = useState(false)
+  const [isUploadingAsset, setIsUploadingAsset] = useState(false)
+  const [uploadedAssets, setUploadedAssets] = useState<UploadedAsset[]>([])
   const [modelCheckDetails, setModelCheckDetails] = useState<{
     primaryLabel: string
     primaryReady: boolean
@@ -65,6 +150,14 @@ export function Chat() {
     lastError: '',
   })
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const plusMenuRef = useRef<HTMLDivElement>(null)
+  const modelMenuRef = useRef<HTMLDivElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const imageInputRef = useRef<HTMLInputElement>(null)
+  const conversationMessagesRef = useRef<ConversationMessage[]>([])
+  const conversationHistoriesRef = useRef<ConversationHistory[]>([])
+  const currentConversationIdRef = useRef<string | null>(null)
+  const conversationIdRef = useRef<string | undefined>(conversationId)
   const { showToast } = useToast()
   const {
     conversationMessages,
@@ -87,9 +180,53 @@ export function Chat() {
     startNewConversation,
   } = useAppStore()
 
+  const configuredAiModels = useMemo(
+    () => (configSnapshot?.aiModels || []).filter((model) => isModelReady(model)),
+    [configSnapshot]
+  )
+
+  const currentWorkspacePath = configSnapshot?.workspace?.rootPath || ''
+  const currentWorkspaceLabel = getPathLeafLabel(currentWorkspacePath)
+  const currentModelLabel =
+    activeAiModel?.effectiveModelName ||
+    activeAiModel?.configuredModelName ||
+    activeAiModel?.configuredName ||
+    '未设置模型'
+
+  useEffect(() => {
+    conversationMessagesRef.current = conversationMessages
+  }, [conversationMessages])
+
+  useEffect(() => {
+    conversationHistoriesRef.current = conversationHistories
+  }, [conversationHistories])
+
+  useEffect(() => {
+    currentConversationIdRef.current = currentConversationId
+  }, [currentConversationId])
+
+  useEffect(() => {
+    conversationIdRef.current = conversationId
+  }, [conversationId])
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [conversationMessages, isLoading])
+
+  useEffect(() => {
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!plusMenuRef.current?.contains(event.target as Node)) {
+        setShowActionMenu(false)
+      }
+
+      if (!modelMenuRef.current?.contains(event.target as Node)) {
+        setShowModelMenu(false)
+      }
+    }
+
+    window.addEventListener('mousedown', handlePointerDown)
+    return () => window.removeEventListener('mousedown', handlePointerDown)
+  }, [])
 
   useEffect(() => {
     if (!isLoading) {
@@ -138,62 +275,64 @@ export function Chat() {
     startNewConversation,
   ])
 
-  useEffect(() => {
-    const checkAiModelConfig = async () => {
-      let hasValidConfig = false
+  const refreshConfigState = async (showLoading = false) => {
+    let hasValidConfig = false
 
-      try {
+    try {
+      if (showLoading) {
         setIsCheckingConfig(true)
-        const config = await getConfig('1')
-        const activeModel = config.aiModels?.find((item) => item.isActive) || config.aiModels?.[0]
-        const primaryReady = isModelReady(config.aiModel)
-        const fallbackReady = isModelReady(activeModel)
-        hasValidConfig = primaryReady || fallbackReady
-        setHasAiModelConfig(hasValidConfig)
-        setModelCheckDetails({
-          primaryLabel: config.aiModel.name || config.aiModel.modelName || '主模型未填写名称',
-          primaryReady,
-          fallbackLabel:
-            activeModel?.name ||
-            activeModel?.modelName ||
-            (config.aiModels.length > 0 ? '已存在候选模型但信息不完整' : '未检测到候选模型'),
-          fallbackReady,
-          lastError: '',
-        })
-      } catch (_error) {
-        setHasAiModelConfig(false)
-        setActiveAiModel(null)
-        hasValidConfig = false
-        setModelCheckDetails({
-          primaryLabel: '未能读取主模型配置',
-          primaryReady: false,
-          fallbackLabel: '未能读取候选模型',
-          fallbackReady: false,
-          lastError: '当前无法读取系统配置，请检查后端服务是否已启动。',
-        })
       }
 
-      try {
-        const activeModelInfo = await getActiveAIModel('1')
-        setActiveAiModel(activeModelInfo)
-        if (activeModelInfo.configured) {
-          setHasAiModelConfig(true)
-        }
-      } catch (_error) {
-        setActiveAiModel(null)
-        setModelCheckDetails((current) => ({
-          ...current,
-          lastError: current.lastError || '当前无法解析实际生效模型，但不影响已保存配置的使用。',
-        }))
-        if (!hasValidConfig) {
-          setHasAiModelConfig(false)
-        }
-      } finally {
+      const config = await getConfig('1')
+      setConfigSnapshot(config)
+
+      const activeModel = config.aiModels?.find((item) => item.isActive) || config.aiModels?.[0]
+      const primaryReady = isModelReady(config.aiModel)
+      const fallbackReady = isModelReady(activeModel)
+      hasValidConfig = primaryReady || fallbackReady
+
+      setHasAiModelConfig(hasValidConfig)
+      setActiveAiModel(
+        buildActiveModelInfo({
+          aiModel: config.aiModel,
+          aiModels: config.aiModels || [],
+        })
+      )
+      setModelCheckDetails({
+        primaryLabel: config.aiModel.name || config.aiModel.modelName || '主模型未填写名称',
+        primaryReady,
+        fallbackLabel:
+          activeModel?.name ||
+          activeModel?.modelName ||
+          (config.aiModels.length > 0 ? '已存在候选模型但信息不完整' : '未检测到候选模型'),
+        fallbackReady,
+        lastError: '',
+      })
+    } catch (_error) {
+      setConfigSnapshot(null)
+      setHasAiModelConfig(false)
+      setActiveAiModel(null)
+      hasValidConfig = false
+      setModelCheckDetails({
+        primaryLabel: '未能读取主模型配置',
+        primaryReady: false,
+        fallbackLabel: '未能读取候选模型',
+        fallbackReady: false,
+        lastError: '当前无法读取系统配置，请检查后端服务是否已启动。',
+      })
+    } finally {
+      if (!hasValidConfig) {
+        setHasAiModelConfig(false)
+      }
+
+      if (showLoading) {
         setIsCheckingConfig(false)
       }
     }
+  }
 
-    checkAiModelConfig()
+  useEffect(() => {
+    void refreshConfigState(true)
   }, [location.pathname])
 
   useEffect(() => {
@@ -235,7 +374,7 @@ export function Chat() {
     })
   }, [currentCommandToken, workflows])
 
-  const hasConversationStarted = conversationMessages.length > 0 || isLoading
+  const hasConversationStarted = conversationMessages.length > 0 || queuedSubmissions.length > 0 || isLoading
 
   const handleSelectWorkflow = (workflow: WorkflowDefinition, insertCommand = false) => {
     setSelectedWorkflow(workflow)
@@ -247,6 +386,127 @@ export function Chat() {
       })
     }
   }
+
+  const processSubmission = async (submission: QueuedSubmission, loadingAlreadyStarted: boolean = false) => {
+    try {
+      if (!loadingAlreadyStarted) {
+        setIsLoading(true)
+      }
+
+      const currentMessages = conversationMessagesRef.current
+      const currentHistories = conversationHistoriesRef.current
+      const currentHistoryId = currentConversationIdRef.current
+      const activeWorkflow = submission.workflow
+      const userMessage: ConversationMessage = {
+        id: submission.id,
+        role: 'user',
+        content: submission.rawMessage,
+        referencedNewsId: submission.referencedNews?.id,
+        workflowId: activeWorkflow?.id,
+        workflowInvocation: activeWorkflow?.invocation.primary,
+        messageType: activeWorkflow ? 'workflow' : 'plain',
+        timestamp: submission.createdAt,
+      }
+
+      addConversationMessage(userMessage)
+
+      const existingHistory = currentHistoryId
+        ? currentHistories.find((item) => item.id === currentHistoryId)
+        : null
+      const now = submission.createdAt
+      const historyId = existingHistory?.id || currentHistoryId || submission.id
+      const messagesWithUser = [...currentMessages, userMessage]
+      const firstMessage = messagesWithUser.find((msg) => msg.role === 'user')
+
+      const pendingHistory: ConversationHistory = {
+        id: historyId,
+        title: firstMessage?.content.substring(0, 50) || '未命名任务',
+        messages: messagesWithUser,
+        createdAt: existingHistory?.createdAt || now,
+        updatedAt: now,
+      }
+
+      upsertConversationHistory(pendingHistory)
+
+      if (conversationIdRef.current !== historyId) {
+        navigate(`/chat/${historyId}`, { replace: true })
+      }
+
+      const referencedPrompt = submission.referencedNews
+        ? [
+            `引用新闻标题：${submission.referencedNews.title}`,
+            `引用新闻来源：${submission.referencedNews.source}`,
+            `引用新闻发布时间：${submission.referencedNews.publishedAt}`,
+            `引用新闻原文：${submission.referencedNews.url}`,
+            `引用新闻摘要：${submission.referencedNews.content}`,
+            `引用新闻关键词：${submission.referencedNews.relatedKeywords.join('、') || '未标注'}`,
+          ].join('\n')
+        : ''
+
+      const data = await chatWithAi({
+        userId: '1',
+        message: referencedPrompt ? `${referencedPrompt}\n\n用户任务：${submission.requestMessage}` : submission.requestMessage,
+        history: currentMessages.slice(-12).map((msg) => ({
+          role: msg.role,
+          content: clampChatText(msg.content, 800),
+        })),
+      })
+
+      if (data.workflow) {
+        setSelectedWorkflow(data.workflow)
+      }
+
+      if (data.execution) {
+        addWorkflowExecution(data.execution)
+      }
+
+      const aiMessage: ConversationMessage = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: data.content,
+        referencedNewsId: submission.referencedNews?.id,
+        workflowId: data.workflow?.id || activeWorkflow?.id,
+        workflowInvocation: data.workflow?.invocation.primary || activeWorkflow?.invocation.primary,
+        messageType: data.workflow ? 'result' : 'plain',
+        executionId: data.execution?.id,
+        artifacts: data.artifacts,
+        timestamp: new Date().toISOString(),
+      }
+      addConversationMessage(aiMessage)
+
+      const updatedMessages = [...currentMessages, userMessage, aiMessage]
+      const completedAt = new Date().toISOString()
+
+      const nextHistory: ConversationHistory = {
+        id: historyId,
+        title: firstMessage?.content.substring(0, 50) || '未命名任务',
+        messages: updatedMessages,
+        createdAt: existingHistory?.createdAt || now,
+        updatedAt: completedAt,
+      }
+
+      upsertConversationHistory(nextHistory)
+    } catch (error) {
+      showToast({
+        title: 'AI 服务暂时不可用',
+        message: `${getErrorMessage(error, '请求失败')}，请检查 AI 模型配置和服务状态。`,
+        variant: 'error',
+      })
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (isLoading || queuedSubmissions.length === 0) {
+      return
+    }
+
+    const [nextSubmission, ...restSubmissions] = queuedSubmissions
+    setIsLoading(true)
+    setQueuedSubmissions(restSubmissions)
+    void processSubmission(nextSubmission, true)
+  }, [isLoading, queuedSubmissions])
 
   const handleSendMessage = async () => {
     const rawMessage = inputMessage.trim()
@@ -272,136 +532,328 @@ export function Chat() {
         requestMessage = `${activeWorkflow.invocation.primary} ${rawMessage}`
       }
 
-      const userMessage: ConversationMessage = {
+      const submission: QueuedSubmission = {
         id: Date.now().toString(),
-        role: 'user',
-        content: rawMessage,
-        workflowId: activeWorkflow?.id,
-        workflowInvocation: activeWorkflow?.invocation.primary,
-        messageType: activeWorkflow ? 'workflow' : 'plain',
-        timestamp: new Date().toISOString(),
+        rawMessage,
+        requestMessage,
+        workflow: activeWorkflow,
+        referencedNews: quotedNews,
+        createdAt: new Date().toISOString(),
       }
 
-      addConversationMessage(userMessage)
       setInputMessage('')
-      setIsLoading(true)
       setShowWorkflowSuggestions(false)
 
-      const existingHistory = currentConversationId
-        ? conversationHistories.find((item) => item.id === currentConversationId)
-        : null
-      const now = new Date().toISOString()
-      const historyId = existingHistory?.id || currentConversationId || `${Date.now()}`
-      const messagesWithUser = [...conversationMessages, userMessage]
-      const firstMessage = messagesWithUser.find((msg) => msg.role === 'user')
-
-      const pendingHistory: ConversationHistory = {
-        id: historyId,
-        title: firstMessage?.content.substring(0, 50) || '未命名任务',
-        messages: messagesWithUser,
-        createdAt: existingHistory?.createdAt || now,
-        updatedAt: now,
+      if (isLoading || queuedSubmissions.length > 0) {
+        setQueuedSubmissions((current) => [...current, submission])
+        showToast({
+          title: '已加入队列',
+          message: '当前有消息正在处理中，这条消息会按顺序提交给 AI。',
+          variant: 'info',
+        })
+        return
       }
 
-      upsertConversationHistory(pendingHistory)
-
-      if (conversationId !== historyId) {
-        navigate(`/chat/${historyId}`, { replace: true })
-      }
-
-      const data = await chatWithAi({
-        userId: '1',
-        message: requestMessage,
-        history: conversationMessages.map((msg) => ({
-          role: msg.role,
-          content: msg.content,
-        })),
-      })
-
-      if (data.workflow) {
-        setSelectedWorkflow(data.workflow)
-      }
-
-      if (data.execution) {
-        addWorkflowExecution(data.execution)
-      }
-
-      const aiMessage: ConversationMessage = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: data.content,
-        workflowId: data.workflow?.id || activeWorkflow?.id,
-        workflowInvocation: data.workflow?.invocation.primary || activeWorkflow?.invocation.primary,
-        messageType: data.workflow ? 'result' : 'plain',
-        executionId: data.execution?.id,
-        artifacts: data.artifacts,
-        timestamp: new Date().toISOString(),
-      }
-      addConversationMessage(aiMessage)
-
-      const updatedMessages = [...conversationMessages, userMessage, aiMessage]
-      const completedAt = new Date().toISOString()
-
-      const nextHistory: ConversationHistory = {
-        id: historyId,
-        title: firstMessage?.content.substring(0, 50) || '未命名任务',
-        messages: updatedMessages,
-        createdAt: existingHistory?.createdAt || now,
-        updatedAt: completedAt,
-      }
-
-      upsertConversationHistory(nextHistory)
+      setIsLoading(true)
+      void processSubmission(submission, true)
     } catch (error) {
       showToast({
-        title: 'AI 服务暂时不可用',
-        message: `${getErrorMessage(error, '请求失败')}，请检查 AI 模型配置和服务状态。`,
+        title: '提交失败',
+        message: getErrorMessage(error, '请稍后重试'),
         variant: 'error',
       })
-    } finally {
-      setIsLoading(false)
     }
+  }
+
+  const handleRemoveQueuedSubmission = (submissionId: string) => {
+    setQueuedSubmissions((current) => current.filter((item) => item.id !== submissionId))
+    showToast({
+      title: '已取消排队',
+      message: '这条消息不会再提交给 AI。',
+      variant: 'success',
+    })
   }
 
   const handleForwardToInput = (content: string) => {
     setInputMessage(content)
   }
 
-  const handleSaveToDraft = async (content: string) => {
-    setIsSavingToDraft(true)
-    try {
-      const lines = content.trim().split('\n')
-      let title = 'AI 助手输出内容'
-      let actualContent = content
+  const registerReferencedNews = (article: NewsArticle) => {
+    setReferencedNewsMap((current) => ({ ...current, [article.id]: article }))
+  }
 
-      if (lines.length > 0) {
-        const firstLine = lines[0].trim()
-        if (firstLine.startsWith('#')) {
-          title = firstLine.replace(/^#+\s*/, '').trim()
-          actualContent = lines.slice(1).join('\n').trim()
-        } else if (firstLine.length > 0 && firstLine.length <= 100) {
-          title = firstLine
-          actualContent = lines.slice(1).join('\n').trim()
-          if (actualContent.length < 50) {
-            title = 'AI 助手输出内容'
-            actualContent = content
-          }
+  const decodeBase64Url = (value: string) => {
+    const normalized = value.replace(/-/g, '+').replace(/_/g, '/')
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=')
+    const binary = atob(padded)
+    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0))
+    return new TextDecoder().decode(bytes)
+  }
+
+  const parseNewsAction = (rawAction: string): { type: 'save-news' | 'quote-news'; article: NewsArticle } | null => {
+    const match = rawAction.match(/^(save-news|quote-news):(.+)$/)
+    if (!match) {
+      return null
+    }
+
+    try {
+      const [, type, payload] = match
+      const article = JSON.parse(decodeBase64Url(payload)) as NewsArticle
+      return {
+        type: type as 'save-news' | 'quote-news',
+        article,
+      }
+    } catch (error) {
+      console.error('解析新闻操作失败:', error)
+      return null
+    }
+  }
+
+  const handleMarkdownAction = async (rawAction: string) => {
+    const parsed = parseNewsAction(rawAction)
+    if (!parsed) {
+      showToast({
+        title: '操作失败',
+        message: '无法识别这条新闻操作。',
+        variant: 'error',
+      })
+      return
+    }
+
+    const { type, article } = parsed
+    registerReferencedNews(article)
+
+    if (type === 'quote-news') {
+      setQuotedNews(article)
+      setInputMessage((current) => current || '请基于这条新闻生成摘要 / 成稿 / 改写版本')
+      showToast({
+        title: '已引用新闻',
+        message: '这条新闻会作为当前对话上下文继续使用。',
+        variant: 'success',
+      })
+      return
+    }
+
+    try {
+      setIsSavingToDraft(true)
+      const data = await createSavedNews({
+        userId: '1',
+        title: article.title,
+        content: article.content,
+        originalNewsId: article.id,
+        originalNewsUrl: article.url,
+        industries: article.relatedIndustries,
+        outputType: 'news',
+      })
+      setSavedNews([data.data as SavedNews, ...savedNews])
+      showToast({
+        title: '保存成功',
+        message: '新闻已保存到任务结果中的新闻草稿。',
+        variant: 'success',
+      })
+    } catch (error) {
+      showToast({
+        title: '保存失败',
+        message: getErrorMessage(error, '请稍后重试'),
+        variant: 'error',
+      })
+    } finally {
+      setIsSavingToDraft(false)
+    }
+  }
+
+  const handleSwitchModel = async (model: AIModelConfig) => {
+    if (!configSnapshot || model.isActive || isSwitchingModel) {
+      setShowModelMenu(false)
+      return
+    }
+
+    try {
+      setIsSwitchingModel(true)
+      const updatedConfig = await switchAIModel({
+        userId: '1',
+        modelId: model.id,
+      })
+      setConfigSnapshot(updatedConfig)
+      setShowModelMenu(false)
+      showToast({
+        title: '模型已切换',
+        message: `当前使用模型已切换为 ${model.name || model.modelName}`,
+        variant: 'success',
+      })
+      await refreshConfigState()
+    } catch (error) {
+      showToast({
+        title: '切换失败',
+        message: getErrorMessage(error, '请稍后重试'),
+        variant: 'error',
+      })
+    } finally {
+      setIsSwitchingModel(false)
+    }
+  }
+
+  const handleChangeWorkspace = async () => {
+    if (!configSnapshot || isUpdatingWorkspace) {
+      return
+    }
+
+    const nextRootPath = window.prompt('请输入新的工程文件夹路径', configSnapshot.workspace.rootPath || '~/Documents/AI助手工作台')
+    if (!nextRootPath || nextRootPath.trim() === configSnapshot.workspace.rootPath) {
+      return
+    }
+
+    try {
+      setIsUpdatingWorkspace(true)
+      const updatedConfig = await updateConfig({
+        userId: '1',
+        aiModel: configSnapshot.aiModel,
+        aiModels: configSnapshot.aiModels,
+        publishPlatforms: configSnapshot.publishPlatforms,
+        workspace: {
+          ...configSnapshot.workspace,
+          rootPath: nextRootPath.trim(),
+        },
+      })
+      setConfigSnapshot(updatedConfig)
+      showToast({
+        title: '目录已更新',
+        message: '工程文件夹已切换，新文件会写入新的工作目录。',
+        variant: 'success',
+      })
+      await refreshConfigState()
+    } catch (error) {
+      showToast({
+        title: '目录切换失败',
+        message: getErrorMessage(error, '请稍后重试'),
+        variant: 'error',
+      })
+    } finally {
+      setIsUpdatingWorkspace(false)
+    }
+  }
+
+  const readFileAsBase64 = (file: File) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => {
+        const result = reader.result
+        if (typeof result !== 'string') {
+          reject(new Error('读取文件失败'))
+          return
+        }
+
+        const [, contentBase64 = ''] = result.split(',')
+        resolve(contentBase64)
+      }
+      reader.onerror = () => reject(new Error('读取文件失败'))
+      reader.readAsDataURL(file)
+    })
+
+  const handleUploadAsset = async (file: File | null) => {
+    if (!file) {
+      return
+    }
+
+    try {
+      setIsUploadingAsset(true)
+      const contentBase64 = await readFileAsBase64(file)
+      const result = await uploadWorkspaceAsset({
+        userId: '1',
+        fileName: file.name,
+        contentBase64,
+        mimeType: file.type || 'application/octet-stream',
+      })
+
+      setUploadedAssets((current) => [
+        result.data,
+        ...current.filter((item) => item.relativePath !== result.data.relativePath),
+      ].slice(0, 4))
+      setInputMessage((current) => current || `已上传文件：${result.data.fileName}，请基于该文件继续处理。`)
+      setShowActionMenu(false)
+      showToast({
+        title: '上传成功',
+        message: `${result.data.fileName} 已写入工程文件夹 uploads 目录。`,
+        variant: 'success',
+      })
+    } catch (error) {
+      showToast({
+        title: '上传失败',
+        message: getErrorMessage(error, '请稍后重试'),
+        variant: 'error',
+      })
+    } finally {
+      setIsUploadingAsset(false)
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''
+      }
+      if (imageInputRef.current) {
+        imageInputRef.current.value = ''
+      }
+    }
+  }
+
+  const deriveSavedContent = (content: string) => {
+    const lines = content.trim().split('\n')
+    let title = 'AI 助手输出内容'
+    let actualContent = content
+
+    if (lines.length > 0) {
+      const firstLine = lines[0].trim()
+      if (firstLine.startsWith('#')) {
+        title = firstLine.replace(/^#+\s*/, '').trim()
+        actualContent = lines.slice(1).join('\n').trim()
+      } else if (firstLine.length > 0 && firstLine.length <= 100) {
+        title = firstLine
+        actualContent = lines.slice(1).join('\n').trim()
+        if (actualContent.length < 50) {
+          title = 'AI 助手输出内容'
+          actualContent = content
         }
       }
+    }
+
+    return {
+      title,
+      content: actualContent || content,
+    }
+  }
+
+  const handleOpenSaveDialog = (content: string) => {
+    setPendingSaveContent(content)
+    setSaveTargetType('news')
+    setSaveFileFormat('md')
+  }
+
+  const handleConfirmSave = async () => {
+    if (!pendingSaveContent) {
+      return
+    }
+
+    setIsSavingToDraft(true)
+    try {
+      const normalized = deriveSavedContent(pendingSaveContent)
 
       const data = await createSavedNews({
         userId: '1',
-        title,
-        content: actualContent || content,
+        title: normalized.title,
+        content: normalized.content,
         categories: [],
         industries: [],
+        outputType: saveTargetType,
+        fileFormat: saveTargetType === 'file' ? saveFileFormat : undefined,
       })
 
       setSavedNews([data.data as SavedNews, ...savedNews])
       showToast({
         title: '保存成功',
-        message: '内容已保存到任务结果',
+        message:
+          saveTargetType === 'file'
+            ? '内容已保存为文件，并写入工作目录 generated'
+            : '内容已保存为新闻，可继续发布',
         variant: 'success',
       })
+      setPendingSaveContent(null)
     } catch (error) {
       showToast({
         title: '保存失败',
@@ -416,10 +868,10 @@ export function Chat() {
   if (isCheckingConfig) {
     return (
       <div className="flex h-full flex-col items-center justify-center px-6 text-center">
-        <div className="surface-panel-soft flex max-w-lg flex-col items-center px-10 py-12">
+        <div className="surface-panel-soft flex max-w-md flex-col items-center px-8 py-10">
           <div className="mb-5 h-16 w-16 animate-spin rounded-full border-4 border-slate-200 border-t-blue-500" />
-          <p className="text-lg font-medium text-slate-900">正在同步 AI 助手工作台</p>
-          <p className="mt-2 text-sm text-editorial-muted">正在检查模型配置与工作流库，请稍候。</p>
+          <p className="text-lg font-medium text-slate-900">正在加载</p>
+          <p className="mt-2 text-sm text-editorial-muted">请稍候</p>
         </div>
       </div>
     )
@@ -428,14 +880,13 @@ export function Chat() {
   if (!hasAiModelConfig) {
     return (
       <div className="flex h-full flex-col items-center justify-center px-6 py-12">
-        <div className="surface-panel w-full max-w-2xl p-8 text-center">
-          <div className="mx-auto mb-6 flex h-24 w-24 items-center justify-center rounded-[28px] bg-blue-50 shadow-[0_20px_50px_rgba(37,99,235,0.08)]">
-            <Server className="h-12 w-12 text-blue-600" />
+        <div className="surface-panel w-full max-w-xl p-8 text-center">
+          <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-[24px] bg-blue-50 shadow-[0_16px_36px_rgba(37,99,235,0.08)]">
+            <Server className="h-10 w-10 text-blue-600" />
           </div>
-          <span className="eyebrow mb-5">Setup Required</span>
-          <h2 className="text-4xl font-semibold text-slate-900">先接入 AI 模型，再开始工作</h2>
-          <p className="mx-auto mt-4 max-w-xl text-base leading-7 text-editorial-muted">
-            完成配置后，你就可以在聊天中直接通过 <code>/工作流名称</code> 调用具体能力，例如新闻推送、新闻助手等。
+          <h2 className="text-3xl font-semibold text-slate-900">先配置 AI 模型</h2>
+          <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-editorial-muted">
+            完成后即可开始对话。
           </p>
           <div className="mx-auto mt-8 grid w-full max-w-xl gap-4 text-left md:grid-cols-2">
             <div className={`rounded-2xl border px-4 py-4 ${modelCheckDetails.primaryReady ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-slate-50'}`}>
@@ -482,17 +933,16 @@ export function Chat() {
   return (
     <div className="flex h-full flex-col bg-transparent">
       <section className="flex min-h-0 flex-1 flex-col bg-transparent">
-        <div className="flex-1 overflow-y-auto px-6 py-6">
+        <div className="flex-1 overflow-y-auto px-2 py-6">
           {!hasConversationStarted ? (
             <div className="flex h-full items-center justify-center">
               <div className="w-full max-w-4xl rounded-[32px] border border-slate-200 bg-white px-10 py-12 shadow-[0_20px_60px_rgba(15,23,42,0.08)]">
-                <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-[24px] bg-gradient-to-br from-editorial-violet via-editorial-indigo to-editorial-cyan">
-                  <Command className="h-10 w-10 text-white" />
+                <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-[20px] bg-blue-600">
+                  <Bot className="h-8 w-8 text-white" />
                 </div>
-                <h2 className="text-center text-4xl font-semibold text-slate-900">直接开始对话</h2>
-                <p className="mx-auto mt-4 max-w-2xl text-center text-base leading-7 text-editorial-muted">
-                  右侧现在完全是聊天工作台。输入自然语言即可开始，也可以用 slash command 调用内置工作流，比如
-                  <code> /新闻推送</code>、<code> /新闻助手</code>。
+                <h2 className="text-center text-3xl font-semibold text-slate-900">开始任务</h2>
+                <p className="mx-auto mt-3 max-w-lg text-center text-sm leading-6 text-editorial-muted">
+                  输入问题，或直接调用工作流。
                 </p>
                 <div className="mt-8 flex flex-wrap justify-center gap-3">
                   {workflows.slice(0, 6).map((workflow) => (
@@ -506,20 +956,6 @@ export function Chat() {
                     </button>
                   ))}
                 </div>
-                <div className="mt-8 grid gap-4 md:grid-cols-3">
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                    <p className="text-xs uppercase tracking-[0.2em] text-editorial-muted">Chat</p>
-                    <p className="mt-2 text-sm leading-6 text-slate-700">普通对话适合临时问题、写作辅助和快速整理思路。</p>
-                  </div>
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                    <p className="text-xs uppercase tracking-[0.2em] text-editorial-muted">Workflow</p>
-                    <p className="mt-2 text-sm leading-6 text-slate-700">slash command 会让 AI 严格按工作流步骤和约束执行。</p>
-                  </div>
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                    <p className="text-xs uppercase tracking-[0.2em] text-editorial-muted">News Push</p>
-                    <p className="mt-2 text-sm leading-6 text-slate-700">新闻推送不再展示在首页，而是按需通过工作流拉取和返回简报。</p>
-                  </div>
-                </div>
               </div>
             </div>
           ) : (
@@ -528,9 +964,29 @@ export function Chat() {
                 <ConversationItem
                   key={message.id}
                   message={message}
-                  onSaveToDraft={message.role === 'assistant' ? handleSaveToDraft : undefined}
+                  referencedNews={message.referencedNewsId ? referencedNewsMap[message.referencedNewsId] || null : null}
+                  onSaveContent={message.role === 'assistant' ? handleOpenSaveDialog : undefined}
                   onForwardToInput={handleForwardToInput}
+                  onMarkdownAction={handleMarkdownAction}
                   isSaving={isSavingToDraft}
+                />
+              ))}
+              {queuedSubmissions.map((submission) => (
+                <ConversationItem
+                  key={submission.id}
+                  message={{
+                    id: submission.id,
+                    role: 'user',
+                    content: submission.rawMessage,
+                    referencedNewsId: submission.referencedNews?.id,
+                    workflowId: submission.workflow?.id,
+                    workflowInvocation: submission.workflow?.invocation.primary,
+                    messageType: submission.workflow ? 'workflow' : 'plain',
+                    timestamp: submission.createdAt,
+                  }}
+                  referencedNews={submission.referencedNews || null}
+                  queueStatus="queued"
+                  onRemoveQueued={() => handleRemoveQueuedSubmission(submission.id)}
                 />
               ))}
               {isLoading && (
@@ -557,7 +1013,11 @@ export function Chat() {
                         <div className="ai-thinking-progress-bar h-full w-1/3 rounded-full bg-gradient-to-r from-editorial-violet via-blue-500 to-editorial-cyan" />
                       </div>
                       <p className="mt-3 text-sm text-editorial-muted">
-                        {selectedWorkflow ? `当前工作流：${selectedWorkflow.displayName}` : '普通对话模式'}
+                        {queuedSubmissions.length > 0
+                          ? `当前排队 ${queuedSubmissions.length} 条，AI 会按顺序处理`
+                          : selectedWorkflow
+                            ? `当前工作流：${selectedWorkflow.displayName}`
+                            : '普通对话模式'}
                       </p>
                     </div>
                   </div>
@@ -569,101 +1029,316 @@ export function Chat() {
         </div>
 
         <div className="border-t border-slate-200 bg-white px-6 py-5">
-          <div className="chat-thread-shell flex flex-col gap-3">
-            <div className="flex flex-wrap items-center gap-3">
-              {selectedWorkflow && (
-                <button
-                  onClick={() => setSelectedWorkflow(null)}
-                  className="focus-ring rounded-full border border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-700"
-                >
-                  当前工作流：{selectedWorkflow.displayName} · 点击清除
-                </button>
-              )}
-              {activeAiModel?.configured && (
-                <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-sm text-slate-700">
-                  <Bot className="h-4 w-4 text-blue-600" />
-                  <span>
-                    当前模型：
-                    <span className="ml-1 font-medium text-slate-900">
-                      {activeAiModel.provider === 'ollama'
-                        ? activeAiModel.effectiveModelName || '未解析'
-                        : activeAiModel.configuredModelName || activeAiModel.configuredName}
-                    </span>
-                  </span>
+          <div className="chat-thread-shell">
+            <div className="relative rounded-[28px] border border-slate-200 bg-white px-4 pb-3 pt-3 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+              {(selectedWorkflow || quotedNews || uploadedAssets.length > 0) && (
+                <div className="mb-3 flex flex-wrap items-center gap-2">
+                  {selectedWorkflow && (
+                    <button
+                      onClick={() => setSelectedWorkflow(null)}
+                      className="focus-ring rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-700"
+                    >
+                      {selectedWorkflow.displayName}
+                    </button>
+                  )}
+                  {quotedNews && (
+                    <button
+                      onClick={() => setQuotedNews(null)}
+                      className="focus-ring max-w-[340px] truncate rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700"
+                    >
+                      引用：{quotedNews.title}
+                    </button>
+                  )}
+                  {uploadedAssets.map((asset) => (
+                    <div
+                      key={asset.relativePath}
+                      className="max-w-[260px] truncate rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-700"
+                    >
+                      {asset.fileName}
+                    </div>
+                  ))}
                 </div>
               )}
 
-            </div>
-
-            <div className="relative flex gap-3">
-              <input
-                type="text"
-                value={inputMessage}
-                onChange={(e) => {
-                  const nextValue = e.target.value
-                  setInputMessage(nextValue)
-                  setShowWorkflowSuggestions(nextValue.startsWith('/'))
-                }}
-                onFocus={() => {
-                  if (inputMessage.startsWith('/')) {
-                    setShowWorkflowSuggestions(true)
+              <div className="relative">
+                <textarea
+                  value={inputMessage}
+                  onChange={(e) => {
+                    const nextValue = e.target.value
+                    setInputMessage(nextValue)
+                    setShowWorkflowSuggestions(nextValue.startsWith('/'))
+                  }}
+                  onFocus={() => {
+                    if (inputMessage.startsWith('/')) {
+                      setShowWorkflowSuggestions(true)
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault()
+                      void handleSendMessage()
+                    } else if (e.key === 'Escape') {
+                      setInputMessage('')
+                      setShowWorkflowSuggestions(false)
+                    }
+                  }}
+                  rows={2}
+                  placeholder={
+                    selectedWorkflow
+                      ? `继续在 ${selectedWorkflow.displayName} 下输入任务...`
+                      : '输入内容，或用 /工作流名称 调用工作流...'
                   }
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    void handleSendMessage()
-                  } else if (e.key === 'Escape') {
-                    setInputMessage('')
-                    setShowWorkflowSuggestions(false)
-                  }
-                }}
-                placeholder={
-                  selectedWorkflow
-                    ? `继续在 ${selectedWorkflow.displayName} 下输入任务...`
-                    : '输入自然语言，或用 /工作流名称 调用工作流...'
-                }
-                className="focus-ring flex-1 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-slate-900 placeholder:text-editorial-muted focus:border-blue-300 focus:bg-white focus:outline-none"
-              />
-              <button
-                onClick={() => void handleSendMessage()}
-                disabled={!inputMessage.trim() || isLoading}
-                className="focus-ring flex items-center gap-2 rounded-2xl bg-gradient-to-r from-editorial-violet to-editorial-cyan px-6 py-4 text-white transition-transform duration-200 hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50"
-                aria-label="发送消息"
-              >
-                <Send className={`h-4 w-4 ${isLoading ? 'animate-pulse' : ''}`} />
-                {isLoading ? '思考中...' : '发送'}
-              </button>
+                  className="focus-ring min-h-[58px] w-full resize-none border-0 bg-transparent px-1 py-0.5 text-[15px] leading-7 text-slate-900 placeholder:text-slate-400 focus:outline-none"
+                />
 
-              {showWorkflowSuggestions && filteredWorkflows.length > 0 && (
-                <div className="absolute bottom-[calc(100%+12px)] left-0 z-20 w-full rounded-3xl border border-slate-200 bg-white p-3 shadow-[0_20px_50px_rgba(15,23,42,0.12)]">
-                  <p className="px-2 pb-2 text-xs uppercase tracking-[0.18em] text-editorial-muted">Workflow Suggestions</p>
-                  <div className="space-y-2">
-                    {filteredWorkflows.map((workflow) => (
-                      <button
-                        key={workflow.id}
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => handleSelectWorkflow(workflow, true)}
-                        className="focus-ring flex w-full items-start justify-between rounded-2xl border border-transparent bg-slate-50 px-4 py-3 text-left transition-colors hover:border-slate-200 hover:bg-white"
-                      >
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <Workflow className="mt-0.5 h-4 w-4 text-blue-500" />
-                            <p className="font-medium text-slate-900">{workflow.displayName}</p>
+                {showWorkflowSuggestions && filteredWorkflows.length > 0 && (
+                  <div className="absolute bottom-[calc(100%+14px)] left-0 z-20 w-full rounded-[24px] border border-slate-200 bg-white p-3 shadow-[0_18px_40px_rgba(15,23,42,0.10)]">
+                    <div className="space-y-1.5">
+                      {filteredWorkflows.map((workflow) => (
+                        <button
+                          key={workflow.id}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => handleSelectWorkflow(workflow, true)}
+                          className="focus-ring flex w-full items-center justify-between rounded-2xl px-3 py-3 text-left transition-colors hover:bg-slate-50"
+                        >
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium text-slate-900">{workflow.displayName}</p>
+                            <p className="truncate text-xs text-slate-500">{workflow.description}</p>
                           </div>
-                          <p className="mt-1 text-sm leading-6 text-editorial-muted">{workflow.description}</p>
-                        </div>
-                        <span className="rounded-full border border-slate-200 px-2.5 py-1 text-xs text-slate-600">
-                          {workflow.invocation.primary}
-                        </span>
-                      </button>
-                    ))}
+                          <span className="ml-3 shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-600">
+                            {workflow.invocation.primary}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
                   </div>
+                )}
+              </div>
+
+              <div className="mt-2 flex items-center justify-between gap-2 border-t border-slate-100 pt-2.5">
+                <div className="flex min-w-0 items-center gap-2">
+                  <div className="relative" ref={plusMenuRef}>
+                    <button
+                      type="button"
+                      onClick={() => setShowActionMenu((current) => !current)}
+                      className="focus-ring flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-700 transition-colors hover:bg-slate-200"
+                      aria-label="更多操作"
+                    >
+                      <Plus className="h-4.5 w-4.5" />
+                    </button>
+                    {showActionMenu && (
+                      <div className="absolute bottom-[calc(100%+12px)] left-0 z-20 w-72 rounded-[26px] border border-slate-200 bg-white p-3 shadow-[0_18px_40px_rgba(15,23,42,0.12)]">
+                        <div className="space-y-1">
+                          {workflows.slice(0, 4).map((workflow) => (
+                            <button
+                              key={workflow.id}
+                              type="button"
+                              onClick={() => {
+                                handleSelectWorkflow(workflow, true)
+                                setShowActionMenu(false)
+                              }}
+                              className="focus-ring flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left transition-colors hover:bg-slate-50"
+                            >
+                              <Workflow className="h-4 w-4 text-slate-500" />
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-medium text-slate-900">{workflow.displayName}</p>
+                                <p className="truncate text-xs text-slate-500">{workflow.invocation.primary}</p>
+                              </div>
+                            </button>
+                          ))}
+                          <div className="my-2 border-t border-slate-100" />
+                          <button
+                            type="button"
+                            onClick={() => fileInputRef.current?.click()}
+                            className="focus-ring flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left transition-colors hover:bg-slate-50"
+                          >
+                            <FileText className="h-4 w-4 text-slate-500" />
+                            <span className="text-sm font-medium text-slate-900">上传文件</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => imageInputRef.current?.click()}
+                            className="focus-ring flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left transition-colors hover:bg-slate-50"
+                          >
+                            <FileImage className="h-4 w-4 text-slate-500" />
+                            <span className="text-sm font-medium text-slate-900">上传图片</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => void handleChangeWorkspace()}
+                    className="focus-ring inline-flex min-w-0 items-center gap-1.5 rounded-full px-2 py-1.5 text-xs text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-700"
+                  >
+                    <FolderOpen className="h-3.5 w-3.5" />
+                    <span className="max-w-[180px] truncate">
+                      {isUpdatingWorkspace ? '切换目录中...' : currentWorkspaceLabel}
+                    </span>
+                    <ChevronDown className="h-3.5 w-3.5" />
+                  </button>
                 </div>
-              )}
+
+                <div className="flex items-center gap-2">
+                  <div className="relative" ref={modelMenuRef}>
+                    <button
+                      type="button"
+                      onClick={() => setShowModelMenu((current) => !current)}
+                      className="focus-ring inline-flex items-center gap-1.5 rounded-full px-2 py-1.5 text-xs text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-700"
+                    >
+                      <Bot className="h-3.5 w-3.5" />
+                      <span className="max-w-[160px] truncate">{isSwitchingModel ? '切换模型中...' : currentModelLabel}</span>
+                      <ChevronDown className="h-3.5 w-3.5" />
+                    </button>
+                    {showModelMenu && configuredAiModels.length > 0 && (
+                      <div className="absolute bottom-[calc(100%+12px)] right-0 z-20 w-72 rounded-[26px] border border-slate-200 bg-white p-3 shadow-[0_18px_40px_rgba(15,23,42,0.12)]">
+                        <div className="space-y-1">
+                          {configuredAiModels.map((model) => {
+                            const isCurrent = model.isActive
+                            return (
+                              <button
+                                key={model.id}
+                                type="button"
+                                onClick={() => void handleSwitchModel(model)}
+                                disabled={isCurrent || isSwitchingModel}
+                                className="focus-ring flex w-full items-center justify-between rounded-2xl px-3 py-3 text-left transition-colors hover:bg-slate-50 disabled:cursor-default disabled:opacity-70"
+                              >
+                                <div className="min-w-0">
+                                  <p className="truncate text-sm font-medium text-slate-900">{model.name || model.modelName}</p>
+                                  <p className="truncate text-xs text-slate-500">{model.modelName || model.baseUrl || model.provider}</p>
+                                </div>
+                                <span className={`ml-3 shrink-0 rounded-full px-2.5 py-1 text-xs ${isCurrent ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'}`}>
+                                  {isCurrent ? '当前' : '切换'}
+                                </span>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <button
+                    onClick={() => void handleSendMessage()}
+                    disabled={!inputMessage.trim()}
+                    className="focus-ring flex h-10 w-10 items-center justify-center rounded-full bg-slate-700 text-white transition-colors hover:bg-slate-900 disabled:cursor-not-allowed disabled:bg-slate-300"
+                    aria-label="发送消息"
+                  >
+                    <Send className={`h-4.5 w-4.5 ${(isLoading || queuedSubmissions.length > 0) ? 'animate-pulse' : ''}`} />
+                  </button>
+                </div>
+              </div>
             </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="hidden"
+              onChange={(event) => void handleUploadAsset(event.target.files?.[0] || null)}
+            />
+            <input
+              ref={imageInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(event) => void handleUploadAsset(event.target.files?.[0] || null)}
+            />
+            {isUploadingAsset && (
+              <p className="mt-3 text-sm text-editorial-muted">正在上传文件到工程目录...</p>
+            )}
           </div>
         </div>
       </section>
+
+      {pendingSaveContent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-xl rounded-[28px] border border-slate-200 bg-white p-7 shadow-[0_28px_90px_rgba(15,23,42,0.18)]">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-xl font-semibold text-slate-900">选择保存格式</h3>
+                <p className="mt-2 text-sm leading-6 text-slate-500">
+                  你可以将这段内容保存为可发布的新闻，或保存为可下载文件。
+                </p>
+              </div>
+              <button
+                onClick={() => setPendingSaveContent(null)}
+                className="rounded-2xl bg-slate-100 px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-200"
+              >
+                关闭
+              </button>
+            </div>
+
+            <div className="mt-6 grid gap-4 md:grid-cols-2">
+              <button
+                onClick={() => setSaveTargetType('news')}
+                className={`rounded-[24px] border px-5 py-5 text-left transition ${
+                  saveTargetType === 'news'
+                    ? 'border-blue-200 bg-blue-50 shadow-[0_14px_36px_rgba(37,99,235,0.08)]'
+                    : 'border-slate-200 bg-slate-50 hover:bg-white'
+                }`}
+              >
+                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-blue-600 shadow-sm">
+                  <Newspaper className="h-5 w-5" />
+                </div>
+                <p className="mt-4 font-medium text-slate-900">保存为新闻</p>
+                <p className="mt-2 text-sm leading-6 text-slate-500">
+                  内容会进入任务结果中的新闻条目，后续可继续编辑和发布。
+                </p>
+              </button>
+
+              <button
+                onClick={() => setSaveTargetType('file')}
+                className={`rounded-[24px] border px-5 py-5 text-left transition ${
+                  saveTargetType === 'file'
+                    ? 'border-blue-200 bg-blue-50 shadow-[0_14px_36px_rgba(37,99,235,0.08)]'
+                    : 'border-slate-200 bg-slate-50 hover:bg-white'
+                }`}
+              >
+                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-blue-600 shadow-sm">
+                  <FileText className="h-5 w-5" />
+                </div>
+                <p className="mt-4 font-medium text-slate-900">保存为文件</p>
+                <p className="mt-2 text-sm leading-6 text-slate-500">
+                  内容会写入系统默认或已配置的工作目录，可在任务结果中直接下载。
+                </p>
+              </button>
+            </div>
+
+            {saveTargetType === 'file' && (
+              <div className="mt-6">
+                <label className="block text-sm font-medium text-slate-700">文件格式</label>
+                <select
+                  value={saveFileFormat}
+                  onChange={(e) => setSaveFileFormat(e.target.value as 'md' | 'txt' | 'json' | 'html')}
+                  className="focus-ring mt-2 h-12 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-700"
+                >
+                  <option value="md">Markdown (.md)</option>
+                  <option value="txt">文本文件 (.txt)</option>
+                  <option value="json">JSON (.json)</option>
+                  <option value="html">HTML (.html)</option>
+                </select>
+              </div>
+            )}
+
+            <div className="mt-7 flex gap-3">
+              <button
+                onClick={() => setPendingSaveContent(null)}
+                className="flex-1 rounded-2xl bg-slate-100 px-4 py-3 text-sm font-medium text-slate-700 transition hover:bg-slate-200"
+              >
+                取消
+              </button>
+              <button
+                onClick={() => void handleConfirmSave()}
+                disabled={isSavingToDraft}
+                className="flex-1 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-50"
+              >
+                {isSavingToDraft ? '保存中...' : saveTargetType === 'file' ? '保存为文件' : '保存为新闻'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

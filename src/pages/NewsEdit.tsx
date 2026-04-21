@@ -7,6 +7,7 @@ import {
   MessageSquare,
   Save,
   Share2,
+  AlertCircle,
 } from 'lucide-react'
 import { useToast } from '@/lib/toast'
 import { useAppStore } from '@/store'
@@ -28,8 +29,15 @@ function Panel({
   return (
     <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_22px_55px_rgba(15,23,42,0.05)]">
       <div className="mb-5">
-        <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
-        <p className="mt-1 text-sm leading-7 text-slate-500">{description}</p>
+        <div className="flex items-center gap-2">
+          <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
+          <div className="relative group">
+            <AlertCircle className="h-4 w-4 text-slate-400 transition-colors group-hover:text-slate-600" />
+            <div className="absolute left-0 top-full mt-2 w-64 rounded-lg bg-slate-900 p-3 text-xs text-white opacity-0 transition-opacity group-hover:opacity-100 pointer-events-none z-10">
+              {description}
+            </div>
+          </div>
+        </div>
       </div>
       {children}
     </section>
@@ -187,44 +195,42 @@ export function NewsEdit() {
   return (
     <div className="h-full overflow-y-auto bg-[linear-gradient(180deg,#f8fafc_0%,#eef2ff_100%)]">
       <div className="mx-auto flex min-h-full w-full max-w-[1600px] flex-col gap-6 px-6 py-6 lg:px-10">
+        <Link
+          to="/news"
+          className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-200"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          返回任务结果
+        </Link>
         <section className="rounded-[32px] border border-slate-200 bg-white/95 p-8 shadow-[0_30px_80px_rgba(15,23,42,0.08)]">
-          <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
+          <div className="flex flex-col gap-6 items-center xl:flex-row xl:items-start xl:justify-between">
             <div className="max-w-3xl">
-              <Link
-                to="/news"
-                className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-200"
-              >
-                <ArrowLeft className="h-4 w-4" />
-                返回任务结果
-              </Link>
               <p className="mt-5 text-xs font-semibold uppercase tracking-[0.28em] text-sky-600">
                 Editor Workspace
               </p>
               <h1 className="mt-3 font-display text-3xl text-slate-900 md:text-4xl">
                 {id ? '编辑任务结果' : '新建任务结果'}
               </h1>
-              <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600 md:text-base">
-                在这里整理工作流输出、补充最终表达并决定是否发布到外部渠道。页面布局围绕白天办公场景做了信息收束，方便持续编辑。
-              </p>
+
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-3 xl:min-w-[520px]">
-              <div className="rounded-[26px] border border-slate-200 bg-white px-5 py-4 shadow-[0_20px_50px_rgba(15,23,42,0.05)]">
+            <div className="grid gap-3 sm:grid-cols-3 xl:min-w-[520px] justify-items-center">
+              <div className="w-36 rounded-[26px] border border-slate-200 bg-white px-4 py-4 shadow-[0_20px_50px_rgba(15,23,42,0.05)] text-center">
                 <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">状态</p>
                 <p className="mt-3 text-2xl font-semibold text-slate-900">
                   {currentNews?.isPublished ? '已发布' : '草稿'}
                 </p>
-                <p className="mt-1 text-sm text-slate-500">当前文稿所处阶段</p>
+
               </div>
-              <div className="rounded-[26px] border border-slate-200 bg-white px-5 py-4 shadow-[0_20px_50px_rgba(15,23,42,0.05)]">
+              <div className="w-36 rounded-[26px] border border-slate-200 bg-white px-4 py-4 shadow-[0_20px_50px_rgba(15,23,42,0.05)] text-center">
                 <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">正文长度</p>
                 <p className="mt-3 text-2xl font-semibold text-slate-900">{contentLength}</p>
-                <p className="mt-1 text-sm text-slate-500">已输入字符数</p>
+
               </div>
-              <div className="rounded-[26px] border border-slate-200 bg-white px-5 py-4 shadow-[0_20px_50px_rgba(15,23,42,0.05)]">
+              <div className="w-36 rounded-[26px] border border-slate-200 bg-white px-4 py-4 shadow-[0_20px_50px_rgba(15,23,42,0.05)] text-center">
                 <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">阅读时长</p>
                 <p className="mt-3 text-2xl font-semibold text-slate-900">{estimatedReadMinutes} 分钟</p>
-                <p className="mt-1 text-sm text-slate-500">按当前内容估算</p>
+
               </div>
             </div>
           </div>
