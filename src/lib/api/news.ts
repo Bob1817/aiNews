@@ -78,7 +78,7 @@ export function updateSavedNewsMemory(news: SavedNews[]) {
 
 export async function createSavedNews(payload: {
   userId: string
-  title: string
+  title?: string
   content: string
   categories?: string[]
   industries?: string[]
@@ -86,6 +86,7 @@ export async function createSavedNews(payload: {
   originalNewsUrl?: string
   outputType?: 'news' | 'file'
   fileFormat?: 'md' | 'txt' | 'json' | 'html'
+  contentFormat?: 'html' | 'markdown' | 'plain'
 }) {
   try {
     console.log('开始保存新闻...', payload)
@@ -130,42 +131,39 @@ export function downloadSavedFile(news: SavedNews) {
   URL.revokeObjectURL(url)
 }
 
-export function updateSavedNews(
+export async function updateSavedNews(
   id: string,
-  payload: { title?: string; content?: string; categories?: string[]; industries?: string[] }
+  payload: {
+    title?: string
+    content?: string
+    categories?: string[]
+    industries?: string[]
+    contentFormat?: 'html' | 'markdown' | 'plain'
+  }
 ) {
-  // 从内存存储或模拟数据中获取原有的新闻信息，保留isPublished和publishedTo状态
-  const existingNews = savedNewsMemory.find(news => news.id === id) || getMockSavedNews().find(news => news.id === id)
-  
-  const updatedNews = {
-    id: id,
-    userId: '1',
-    title: payload.title || '测试新闻',
-    content: payload.content || '测试内容',
-    categories: payload.categories || [],
-    industries: payload.industries || [],
-    originalNewsId: existingNews?.originalNewsId || '',
-    url: existingNews?.url || `https://example.com/news/${id}`,
-    isPublished: existingNews?.isPublished || false,
-    publishedTo: existingNews?.publishedTo || [],
-    createdAt: existingNews?.createdAt || new Date().toISOString(),
-    updatedAt: new Date().toISOString()
+  console.log('开始更新保存的新闻...', { id, payload })
+  const result = await apiRequest<{ success: boolean; message: string; data: SavedNews }>(
+    `/api/news/saved/${id}`,
+    {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    }
+  )
+  console.log('更新保存的新闻成功:', result)
+
+  if (result.data) {
+    const index = savedNewsMemory.findIndex((news) => news.id === id)
+    if (index !== -1) {
+      savedNewsMemory[index] = result.data
+    } else {
+      savedNewsMemory.unshift(result.data)
+    }
   }
-  
-  // 更新内存存储
-  const index = savedNewsMemory.findIndex(news => news.id === id)
-  if (index !== -1) {
-    savedNewsMemory[index] = updatedNews
-  } else {
-    savedNewsMemory.push(updatedNews)
-  }
-  
-  // 返回模拟数据
-  return Promise.resolve({
-    success: true,
-    message: '更新成功',
-    data: updatedNews
-  })
+
+  return result
 }
 
 export function publishNews(_id: string, _platforms: string[]) {

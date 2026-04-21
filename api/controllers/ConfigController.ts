@@ -387,6 +387,7 @@ export class ConfigController {
           fileName: savedFileName,
           filePath: savedFilePath,
           relativePath: `uploads/${savedFileName}`,
+          assetUrl: `/api/config/workspace/asset?userId=${encodeURIComponent(userId)}&path=${encodeURIComponent(`uploads/${savedFileName}`)}`,
           mimeType: mimeType || 'application/octet-stream',
         },
       })
@@ -394,6 +395,46 @@ export class ConfigController {
       console.error('上传工作文件失败:', error)
       return res.status(500).json({
         error: '上传工作文件失败',
+        message: error instanceof Error ? error.message : '未知错误',
+      })
+    }
+  }
+
+  async getWorkspaceAsset(req: Request, res: Response) {
+    try {
+      const userId = String(req.query.userId || '')
+      const requestedPath = String(req.query.path || '')
+
+      if (!userId || !requestedPath) {
+        return res.status(400).json({
+          error: '参数错误',
+          message: '请提供 userId 和 path',
+        })
+      }
+
+      if (!requestedPath.startsWith('uploads/')) {
+        return res.status(400).json({
+          error: '参数错误',
+          message: '仅支持访问 uploads 目录中的文件',
+        })
+      }
+
+      const config = await this.configService.getConfig(userId)
+      const uploadsDir = path.resolve(config.workspace.rootPath, 'uploads')
+      const absolutePath = path.resolve(config.workspace.rootPath, requestedPath)
+
+      if (!absolutePath.startsWith(`${uploadsDir}${path.sep}`) && absolutePath !== uploadsDir) {
+        return res.status(403).json({
+          error: '访问被拒绝',
+          message: '无权访问该文件',
+        })
+      }
+
+      return res.sendFile(absolutePath)
+    } catch (error) {
+      console.error('读取工作文件失败:', error)
+      return res.status(500).json({
+        error: '读取工作文件失败',
         message: error instanceof Error ? error.message : '未知错误',
       })
     }

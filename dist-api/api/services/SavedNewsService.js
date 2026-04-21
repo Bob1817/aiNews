@@ -8,6 +8,7 @@ const promises_1 = require("node:fs/promises");
 const node_path_1 = __importDefault(require("node:path"));
 const AICrawlerService_1 = require("./AICrawlerService");
 const ConfigService_1 = require("./ConfigService");
+const newsContentNormalizer_1 = require("./newsContentNormalizer");
 class SavedNewsService {
     constructor() {
         this.configService = new ConfigService_1.ConfigService();
@@ -92,11 +93,16 @@ class SavedNewsService {
         const resolvedContent = outputType === 'news' && data.originalNewsUrl
             ? await this.aiCrawlerService.fetchArticleContent(data.originalNewsUrl, data.content)
             : data.content;
+        const normalizedNewsContent = (0, newsContentNormalizer_1.normalizeSavedNewsContent)({
+            title: data.title,
+            content: resolvedContent,
+        });
         const newNews = {
             id,
             userId: data.userId,
-            title: data.title,
-            content: resolvedContent,
+            title: normalizedNewsContent.title,
+            content: normalizedNewsContent.content,
+            contentFormat: normalizedNewsContent.contentFormat,
             originalNewsId: data.originalNewsId,
             url: data.originalNewsUrl,
             outputType,
@@ -115,7 +121,7 @@ class SavedNewsService {
             const fileName = `${safeTitle}-${id}.${fileFormat}`;
             const filePath = node_path_1.default.join(generatedDir, fileName);
             await (0, promises_1.mkdir)(generatedDir, { recursive: true });
-            await (0, promises_1.writeFile)(filePath, this.buildFileContent(data.title, data.content, fileFormat), 'utf-8');
+            await (0, promises_1.writeFile)(filePath, this.buildFileContent(normalizedNewsContent.title, normalizedNewsContent.content, fileFormat), 'utf-8');
             newNews.fileName = fileName;
             newNews.fileFormat = fileFormat;
             newNews.filePath = filePath;
@@ -138,6 +144,8 @@ class SavedNewsService {
             news.categories = data.categories;
         if (data.industries !== undefined)
             news.industries = data.industries;
+        if (data.contentFormat)
+            news.contentFormat = data.contentFormat;
         news.updatedAt = new Date().toISOString();
         return news;
     }

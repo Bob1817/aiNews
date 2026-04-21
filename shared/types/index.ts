@@ -14,6 +14,7 @@ export interface SavedNews {
   userId: string
   title: string
   content: string
+  contentFormat?: 'html' | 'markdown' | 'plain'
   originalNewsId?: string
   url?: string
   outputType?: 'news' | 'file'

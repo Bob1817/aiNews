@@ -1,5 +1,5 @@
 import type { ActiveAIModelInfo, UserConfig } from '@/types'
-import { apiRequest, withJsonBody } from '@/lib/api'
+import { apiRequest, apiUrl, withJsonBody } from '@/lib/api'
 
 export function getConfig(userId: string) {
   return apiRequest<UserConfig>(`/api/config?userId=${encodeURIComponent(userId)}`)
@@ -69,7 +69,21 @@ export function uploadWorkspaceAsset(payload: {
       fileName: string
       filePath: string
       relativePath: string
+      assetUrl?: string
       mimeType: string
     }
-  }>('/api/config/workspace/upload', withJsonBody(payload, { method: 'POST' }))
+  }>('/api/config/workspace/upload', withJsonBody(payload, { method: 'POST' })).then((result) => ({
+    ...result,
+    data: {
+      ...result.data,
+      assetUrl:
+        result.data.assetUrl
+          ? apiUrl(result.data.assetUrl)
+          : getWorkspaceAssetUrl(result.data.relativePath, payload.userId),
+    },
+  }))
+}
+
+export function getWorkspaceAssetUrl(relativePath: string, userId: string) {
+  return apiUrl(`/api/config/workspace/asset?userId=${encodeURIComponent(userId)}&path=${encodeURIComponent(relativePath)}`)
 }

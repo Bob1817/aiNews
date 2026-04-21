@@ -1,4 +1,4 @@
-import { Clock, MessageSquarePlus, Trash2 } from 'lucide-react'
+import { Clock, Trash2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useToast } from '@/lib/toast'
 import { useAppStore } from '@/store'
@@ -11,7 +11,6 @@ export function History() {
     removeConversationHistory,
     setCurrentConversationId,
     loadConversationMessages,
-    startNewConversation,
   } = useAppStore()
 
   const handleOpenHistory = (historyId: string) => {
@@ -37,11 +36,6 @@ export function History() {
       message: '任务历史已移除。',
       variant: 'success',
     })
-  }
-
-  const handleCreateTask = () => {
-    startNewConversation()
-    navigate('/chat/new')
   }
 
   return (

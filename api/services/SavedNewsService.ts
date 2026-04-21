@@ -3,6 +3,7 @@ import path from 'node:path'
 import { SavedNews } from '../../shared/types'
 import { AICrawlerService } from './AICrawlerService'
 import { ConfigService } from './ConfigService'
+import { normalizeSavedNewsContent } from './newsContentNormalizer'
 
 export class SavedNewsService {
   private static savedNews: SavedNews[] = []
@@ -97,7 +98,7 @@ export class SavedNewsService {
   // 保存新闻
   async saveNews(data: {
     userId: string
-    title: string
+    title?: string
     content: string
     originalNewsId?: string
     originalNewsUrl?: string
@@ -112,11 +113,16 @@ export class SavedNewsService {
       outputType === 'news' && data.originalNewsUrl
         ? await this.aiCrawlerService.fetchArticleContent(data.originalNewsUrl, data.content)
         : data.content
+    const normalizedNewsContent = normalizeSavedNewsContent({
+      title: data.title,
+      content: resolvedContent,
+    })
     const newNews: SavedNews = {
       id,
       userId: data.userId,
-      title: data.title,
-      content: resolvedContent,
+      title: normalizedNewsContent.title,
+      content: normalizedNewsContent.content,
+      contentFormat: normalizedNewsContent.contentFormat,
       originalNewsId: data.originalNewsId,
       url: data.originalNewsUrl,
       outputType,
@@ -139,7 +145,7 @@ export class SavedNewsService {
       await mkdir(generatedDir, { recursive: true })
       await writeFile(
         filePath,
-        this.buildFileContent(data.title, data.content, fileFormat),
+        this.buildFileContent(normalizedNewsContent.title, normalizedNewsContent.content, fileFormat),
         'utf-8'
       )
 
@@ -159,6 +165,7 @@ export class SavedNewsService {
     content?: string
     categories?: string[]
     industries?: string[]
+    contentFormat?: SavedNews['contentFormat']
   }): Promise<SavedNews> {
     const news = SavedNewsService.savedNews.find((news) => news.id === id)
     if (!news) {
@@ -169,6 +176,7 @@ export class SavedNewsService {
     if (data.content) news.content = data.content
     if (data.categories !== undefined) news.categories = data.categories
     if (data.industries !== undefined) news.industries = data.industries
+    if (data.contentFormat) news.contentFormat = data.contentFormat
     news.updatedAt = new Date().toISOString()
 
     return news

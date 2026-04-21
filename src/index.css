@@ -205,6 +205,104 @@ button,
   display: none;             /* Chrome, Safari and Opera */
 }
 
+.rich-editor {
+  min-height: 0;
+}
+
+.rich-editor .tiptap {
+  min-height: 100%;
+  outline: none;
+  color: #0f172a;
+  line-height: 1.85;
+  padding-bottom: 3rem;
+}
+
+.rich-editor .tiptap p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: #94a3b8;
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+.article-content,
+.rich-editor .tiptap {
+  font-size: 0.98rem;
+}
+
+.article-content h1,
+.article-content h2,
+.article-content h3,
+.rich-editor .tiptap h1,
+.rich-editor .tiptap h2,
+.rich-editor .tiptap h3 {
+  color: #0f172a;
+  line-height: 1.2;
+  margin-top: 1.2em;
+  margin-bottom: 0.5em;
+}
+
+.article-content h1,
+.rich-editor .tiptap h1 {
+  font-size: 1.9rem;
+}
+
+.article-content h2,
+.rich-editor .tiptap h2 {
+  font-size: 1.45rem;
+}
+
+.article-content h3,
+.rich-editor .tiptap h3 {
+  font-size: 1.2rem;
+}
+
+.article-content p,
+.rich-editor .tiptap p {
+  margin: 0.9em 0;
+  color: #334155;
+}
+
+.article-content ul,
+.article-content ol,
+.rich-editor .tiptap ul,
+.rich-editor .tiptap ol {
+  margin: 1em 0;
+  padding-left: 1.4rem;
+  color: #334155;
+}
+
+.article-content li,
+.rich-editor .tiptap li {
+  margin: 0.35em 0;
+}
+
+.article-content blockquote,
+.rich-editor .tiptap blockquote {
+  border-left: 3px solid #7dd3fc;
+  background: rgba(14, 165, 233, 0.06);
+  border-radius: 0 18px 18px 0;
+  padding: 0.2rem 1rem;
+  color: #475569;
+  margin: 1.2rem 0;
+}
+
+.article-content img,
+.rich-editor .tiptap img {
+  width: 100%;
+  max-width: 100%;
+  border-radius: 18px;
+  margin: 1.2rem 0;
+  box-shadow: 0 20px 45px rgba(15, 23, 42, 0.12);
+}
+
+.article-content a,
+.rich-editor .tiptap a {
+  color: #0284c7;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 /* 减少动画支持 */
 @media (prefers-reduced-motion: reduce) {
   *,

@@ -1,21 +1,25 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
+  AlertCircle,
   ArrowLeft,
   CheckCircle2,
   Globe,
   MessageSquare,
   Save,
   Share2,
-  AlertCircle,
 } from 'lucide-react'
 import { useToast } from '@/lib/toast'
 import { useAppStore } from '@/store'
 import type { NewsCategory, SavedNews } from '@/types'
 import { getErrorMessage } from '@/lib/errors'
 import { getCategories } from '@/lib/api/categories'
-import { createSavedNews, publishNews, updateSavedNews } from '@/lib/api/news'
+import { createSavedNews, getSavedNews, updateSavedNews, publishNews } from '@/lib/api/news'
 import { getDefaultCategories } from '@/lib/fallbacks'
+import { uploadWorkspaceAsset } from '@/lib/api/config'
+import { ArticleContent } from '@/components/ArticleContent'
+import { RichTextEditor } from '@/components/RichTextEditor'
+import { convertContentToHtml, getContentExcerpt } from '@/lib/utils/contentFormat'
 
 function Panel({
   title,
@@ -31,9 +35,9 @@ function Panel({
       <div className="mb-5">
         <div className="flex items-center gap-2">
           <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
-          <div className="relative group">
+          <div className="group relative">
             <AlertCircle className="h-4 w-4 text-slate-400 transition-colors group-hover:text-slate-600" />
-            <div className="absolute left-0 top-full mt-2 w-64 rounded-lg bg-slate-900 p-3 text-xs text-white opacity-0 transition-opacity group-hover:opacity-100 pointer-events-none z-10">
+            <div className="pointer-events-none absolute left-0 top-full z-10 mt-2 w-64 rounded-lg bg-slate-900 p-3 text-xs text-white opacity-0 transition-opacity group-hover:opacity-100">
               {description}
             </div>
           </div>
@@ -57,13 +61,27 @@ export function NewsEdit() {
     title: '',
     content: '',
     categories: [] as string[],
+    contentFormat: 'html' as const,
   })
   const [isSaving, setIsSaving] = useState(false)
   const [isPublishing, setIsPublishing] = useState(false)
   const [showPublishOptions, setShowPublishOptions] = useState(false)
   const [categories, setCategories] = useState<NewsCategory[]>([])
   const [isLoadingCategories, setIsLoadingCategories] = useState(false)
+  const [isLoadingNews, setIsLoadingNews] = useState(Boolean(id))
   const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>([])
+  const [editorResetKey, setEditorResetKey] = useState(0)
+
+  const applyNewsToForm = (news: SavedNews) => {
+    setFormData({
+      title: news.title,
+      content: convertContentToHtml(news.content, news.contentFormat),
+      categories: news.categories || [],
+      contentFormat: 'html',
+    })
+    setSelectedPlatforms(news.publishedTo || [])
+    setEditorResetKey((current) => current + 1)
+  }
 
   useEffect(() => {
     const fetchCategories = async () => {
@@ -84,22 +102,54 @@ export function NewsEdit() {
     }
 
     fetchCategories()
+  }, [showToast])
 
-    if (id) {
-      const news = savedNews.find((item) => item.id === id)
-      if (news) {
-        setFormData({
-          title: news.title,
-          content: news.content,
-          categories: news.categories || [],
+  useEffect(() => {
+    const loadNews = async () => {
+      if (!id) {
+        setIsLoadingNews(false)
+        return
+      }
+
+      setIsLoadingNews(true)
+
+      const existingNews = savedNews.find((item) => item.id === id)
+      if (existingNews) {
+        applyNewsToForm(existingNews)
+        setIsLoadingNews(false)
+        return
+      }
+
+      try {
+        const allSavedNews = await getSavedNews('1')
+        setSavedNews(allSavedNews)
+        const matchedNews = allSavedNews.find((item) => item.id === id)
+        if (matchedNews) {
+          applyNewsToForm(matchedNews)
+        } else {
+          showToast({
+            title: '内容不存在',
+            message: '未找到对应的任务结果。',
+            variant: 'error',
+          })
+        }
+      } catch (error) {
+        showToast({
+          title: '加载失败',
+          message: getErrorMessage(error, '请稍后重试'),
+          variant: 'error',
         })
-        setSelectedPlatforms(news.publishedTo || [])
+      } finally {
+        setIsLoadingNews(false)
       }
     }
-  }, [id, savedNews, showToast])
+
+    loadNews()
+  }, [id, savedNews, setSavedNews, showToast])
 
   const currentNews = id ? savedNews.find((item) => item.id === id) : null
-  const contentLength = formData.content.trim().length
+  const plainTextContent = getContentExcerpt(formData.content, formData.contentFormat, Number.MAX_SAFE_INTEGER)
+  const contentLength = plainTextContent.trim().length
   const estimatedReadMinutes = Math.max(1, Math.ceil(contentLength / 450))
   const selectedCategoryNames = useMemo(
     () =>
@@ -109,8 +159,43 @@ export function NewsEdit() {
     [categories, formData.categories]
   )
 
+  const readFileAsBase64 = (file: File) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => {
+        const result = reader.result
+        if (typeof result !== 'string') {
+          reject(new Error('读取文件失败'))
+          return
+        }
+
+        const [, contentBase64 = ''] = result.split(',')
+        resolve(contentBase64)
+      }
+      reader.onerror = () => reject(new Error('读取文件失败'))
+      reader.readAsDataURL(file)
+    })
+
+  const handleUploadImage = async (file: File) => {
+    const contentBase64 = await readFileAsBase64(file)
+    const result = await uploadWorkspaceAsset({
+      userId: '1',
+      fileName: file.name,
+      contentBase64,
+      mimeType: file.type || 'application/octet-stream',
+    })
+
+    showToast({
+      title: '图片已上传',
+      message: `${file.name} 已插入正文。`,
+      variant: 'success',
+    })
+
+    return result.data.assetUrl
+  }
+
   const handleSave = async () => {
-    if (!formData.title.trim() || !formData.content.trim()) return
+    if (!formData.title.trim() || !plainTextContent.trim()) return
 
     setIsSaving(true)
 
@@ -193,8 +278,8 @@ export function NewsEdit() {
   }
 
   return (
-    <div className="h-full overflow-y-auto bg-[linear-gradient(180deg,#f8fafc_0%,#eef2ff_100%)]">
-      <div className="mx-auto flex min-h-full w-full max-w-[1600px] flex-col gap-6 px-6 py-6 lg:px-10">
+    <div className="h-full overflow-hidden bg-[linear-gradient(180deg,#f8fafc_0%,#eef2ff_100%)]">
+      <div className="mx-auto flex h-full w-full max-w-[1600px] flex-col gap-6 overflow-hidden px-6 py-6 lg:px-10">
         <Link
           to="/news"
           className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-200"
@@ -202,8 +287,9 @@ export function NewsEdit() {
           <ArrowLeft className="h-4 w-4" />
           返回任务结果
         </Link>
+
         <section className="rounded-[32px] border border-slate-200 bg-white/95 p-8 shadow-[0_30px_80px_rgba(15,23,42,0.08)]">
-          <div className="flex flex-col gap-6 items-center xl:flex-row xl:items-start xl:justify-between">
+          <div className="flex flex-col items-center gap-6 xl:flex-row xl:items-start xl:justify-between">
             <div className="max-w-3xl">
               <p className="mt-5 text-xs font-semibold uppercase tracking-[0.28em] text-sky-600">
                 Editor Workspace
@@ -211,36 +297,32 @@ export function NewsEdit() {
               <h1 className="mt-3 font-display text-3xl text-slate-900 md:text-4xl">
                 {id ? '编辑任务结果' : '新建任务结果'}
               </h1>
-
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-3 xl:min-w-[520px] justify-items-center">
-              <div className="w-36 rounded-[26px] border border-slate-200 bg-white px-4 py-4 shadow-[0_20px_50px_rgba(15,23,42,0.05)] text-center">
+            <div className="grid justify-items-center gap-3 sm:grid-cols-3 xl:min-w-[520px]">
+              <div className="w-36 rounded-[26px] border border-slate-200 bg-white px-4 py-4 text-center shadow-[0_20px_50px_rgba(15,23,42,0.05)]">
                 <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">状态</p>
                 <p className="mt-3 text-2xl font-semibold text-slate-900">
                   {currentNews?.isPublished ? '已发布' : '草稿'}
                 </p>
-
               </div>
-              <div className="w-36 rounded-[26px] border border-slate-200 bg-white px-4 py-4 shadow-[0_20px_50px_rgba(15,23,42,0.05)] text-center">
+              <div className="w-36 rounded-[26px] border border-slate-200 bg-white px-4 py-4 text-center shadow-[0_20px_50px_rgba(15,23,42,0.05)]">
                 <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">正文长度</p>
                 <p className="mt-3 text-2xl font-semibold text-slate-900">{contentLength}</p>
-
               </div>
-              <div className="w-36 rounded-[26px] border border-slate-200 bg-white px-4 py-4 shadow-[0_20px_50px_rgba(15,23,42,0.05)] text-center">
+              <div className="w-36 rounded-[26px] border border-slate-200 bg-white px-4 py-4 text-center shadow-[0_20px_50px_rgba(15,23,42,0.05)]">
                 <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">阅读时长</p>
                 <p className="mt-3 text-2xl font-semibold text-slate-900">{estimatedReadMinutes} 分钟</p>
-
               </div>
             </div>
           </div>
         </section>
 
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.4fr)_380px]">
-          <div className="space-y-6">
+        <div className="grid min-h-0 flex-1 gap-6 xl:grid-cols-[minmax(0,1.4fr)_420px]">
+          <div className="min-h-0 space-y-6 overflow-y-auto pr-2">
             <Panel
               title="内容编辑"
-              description="保留工作流输出的核心信息，再补齐最终可交付的标题与正文。"
+              description="正文以富文本方式编辑，支持标题、段落、列表、引用和图片插入。"
             >
               <div className="space-y-5">
                 <div>
@@ -256,13 +338,25 @@ export function NewsEdit() {
 
                 <div>
                   <label className="mb-2 block text-sm font-medium text-slate-700">正文</label>
-                  <textarea
-                    value={formData.content}
-                    onChange={(e) => setFormData((current) => ({ ...current, content: e.target.value }))}
-                    placeholder="输入最终对外的内容稿，或者整理工作流结果。"
-                    rows={22}
-                    className={`${inputClassName} min-h-[520px] resize-y leading-7`}
-                  />
+                  {isLoadingNews ? (
+                    <div className="flex min-h-[520px] items-center justify-center rounded-[24px] border border-slate-200 bg-slate-50 text-sm text-slate-500">
+                      正在加载正文内容...
+                    </div>
+                  ) : (
+                    <RichTextEditor
+                      key={id ? `${id}-${editorResetKey}` : 'new-news'}
+                      value={formData.content}
+                      placeholder="输入最终对外的内容稿，支持插入图片。"
+                      onChange={(content) =>
+                        setFormData((current) => ({
+                          ...current,
+                          content,
+                          contentFormat: 'html',
+                        }))
+                      }
+                      onUploadImage={handleUploadImage}
+                    />
+                  )}
                 </div>
               </div>
             </Panel>
@@ -303,81 +397,91 @@ export function NewsEdit() {
             </Panel>
           </div>
 
-          <div className="space-y-6">
-            <Panel
-              title="操作面板"
-              description="先保存草稿，确认无误后再发布到外部渠道。"
-            >
-              <div className="space-y-3">
-                {currentNews?.isPublished && (
-                  <div className="flex items-center gap-2 rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700">
-                    <CheckCircle2 className="h-4 w-4" />
-                    该内容已发布，可继续编辑后再次同步。
-                  </div>
-                )}
+          <div className="min-h-0 flex flex-col gap-6 pr-2">
+            <div className="shrink-0">
+              <Panel
+                title="操作面板"
+                description="先保存草稿，确认无误后再发布到外部渠道。"
+              >
+                <div className="space-y-3">
+                  {currentNews?.isPublished && (
+                    <div className="flex items-center gap-2 rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700">
+                      <CheckCircle2 className="h-4 w-4" />
+                      该内容已发布，可继续编辑后再次同步。
+                    </div>
+                  )}
 
-                {id && (
+                  {id && (
+                    <button
+                      onClick={() => setShowPublishOptions(true)}
+                      disabled={isPublishing}
+                      className="flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-50"
+                    >
+                      <Share2 className="h-4 w-4" />
+                      {isPublishing ? '发布中...' : '发布到渠道'}
+                    </button>
+                  )}
+
                   <button
-                    onClick={() => setShowPublishOptions(true)}
-                    disabled={isPublishing}
-                    className="flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-50"
+                    onClick={handleSave}
+                    disabled={isSaving}
+                    className="flex w-full items-center justify-center gap-2 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-medium text-sky-700 transition hover:bg-sky-100 disabled:opacity-50"
                   >
-                    <Share2 className="h-4 w-4" />
-                    {isPublishing ? '发布中...' : '发布到渠道'}
+                    <Save className="h-4 w-4" />
+                    {isSaving ? '保存中...' : '保存草稿'}
                   </button>
-                )}
-
-                <button
-                  onClick={handleSave}
-                  disabled={isSaving}
-                  className="flex w-full items-center justify-center gap-2 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-medium text-sky-700 transition hover:bg-sky-100 disabled:opacity-50"
-                >
-                  <Save className="h-4 w-4" />
-                  {isSaving ? '保存中...' : '保存草稿'}
-                </button>
-              </div>
-            </Panel>
-
-            <Panel
-              title="当前摘要"
-              description="快速检查当前文稿的结构完整度，避免编辑过程中丢失关键信息。"
-            >
-              <div className="space-y-4 text-sm text-slate-600">
-                <div className="rounded-2xl bg-slate-50 p-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">标题预览</p>
-                  <p className="mt-2 text-base font-medium text-slate-900">
-                    {formData.title.trim() || '尚未填写标题'}
-                  </p>
                 </div>
+              </Panel>
+            </div>
 
-                <div className="rounded-2xl bg-slate-50 p-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">分类</p>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {selectedCategoryNames.length > 0 ? (
-                      selectedCategoryNames.map((name) => (
-                        <span
-                          key={name}
-                          className="rounded-full bg-violet-50 px-3 py-1 text-xs font-medium text-violet-700"
-                        >
-                          {name}
-                        </span>
-                      ))
-                    ) : (
-                      <span className="text-sm text-slate-500">尚未选择分类</span>
-                    )}
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              <Panel
+                title="文章预览"
+                description="按最终阅读形态渲染正文，编辑时可实时检查排版、图片和段落层次。"
+              >
+                <div className="space-y-4">
+                  <div className="rounded-2xl bg-slate-50 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">标题预览</p>
+                    <p className="mt-2 text-base font-medium text-slate-900">
+                      {formData.title.trim() || '尚未填写标题'}
+                    </p>
                   </div>
-                </div>
 
-                <div className="rounded-2xl bg-slate-50 p-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">编辑建议</p>
-                  <ul className="mt-3 space-y-2 leading-7 text-slate-600">
-                    <li>先明确标题和结论，再回头补充细节段落。</li>
-                    <li>用于发布的内容建议补齐分类，方便后续检索。</li>
-                    <li>若需要外发，优先在保存后进行渠道测试与发布。</li>
-                  </ul>
+                  <div className="rounded-2xl bg-slate-50 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">分类</p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {selectedCategoryNames.length > 0 ? (
+                        selectedCategoryNames.map((name) => (
+                          <span
+                            key={name}
+                            className="rounded-full bg-violet-50 px-3 py-1 text-xs font-medium text-violet-700"
+                          >
+                            {name}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="text-sm text-slate-500">尚未选择分类</span>
+                      )}
+                    </div>
+                  </div>
+
+                  <article className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-[0_16px_40px_rgba(15,23,42,0.05)]">
+                    <h3 className="font-display text-2xl text-slate-900">
+                      {formData.title.trim() || '尚未填写标题'}
+                    </h3>
+                    <div className="mt-4 border-t border-slate-100 pt-4">
+                      {plainTextContent.trim() ? (
+                        <ArticleContent content={formData.content} contentFormat={formData.contentFormat} />
+                      ) : (
+                        <p className="text-sm leading-7 text-slate-500">
+                          这里会显示文章最终预览，当前还没有正文内容。
+                        </p>
+                      )}
+                    </div>
+                  </article>
                 </div>
-              </div>
-            </Panel>
+              </Panel>
+            </div>
           </div>
         </div>
       </div>

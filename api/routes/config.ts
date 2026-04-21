@@ -7,6 +7,7 @@ const configController = new ConfigController()
 // 获取配置
 router.get('/', (req, res) => configController.getConfig(req, res))
 router.get('/active-model', (req, res) => configController.getActiveAIModel(req, res))
+router.get('/workspace/asset', (req, res) => configController.getWorkspaceAsset(req, res))
 router.post('/workspace/upload', (req, res) => configController.uploadWorkspaceAsset(req, res))
 
 // 保存配置

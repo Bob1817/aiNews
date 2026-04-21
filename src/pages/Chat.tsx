@@ -793,32 +793,6 @@ export function Chat() {
     }
   }
 
-  const deriveSavedContent = (content: string) => {
-    const lines = content.trim().split('\n')
-    let title = 'AI 助手输出内容'
-    let actualContent = content
-
-    if (lines.length > 0) {
-      const firstLine = lines[0].trim()
-      if (firstLine.startsWith('#')) {
-        title = firstLine.replace(/^#+\s*/, '').trim()
-        actualContent = lines.slice(1).join('\n').trim()
-      } else if (firstLine.length > 0 && firstLine.length <= 100) {
-        title = firstLine
-        actualContent = lines.slice(1).join('\n').trim()
-        if (actualContent.length < 50) {
-          title = 'AI 助手输出内容'
-          actualContent = content
-        }
-      }
-    }
-
-    return {
-      title,
-      content: actualContent || content,
-    }
-  }
-
   const handleOpenSaveDialog = (content: string) => {
     setPendingSaveContent(content)
     setSaveTargetType('news')
@@ -832,12 +806,9 @@ export function Chat() {
 
     setIsSavingToDraft(true)
     try {
-      const normalized = deriveSavedContent(pendingSaveContent)
-
       const data = await createSavedNews({
         userId: '1',
-        title: normalized.title,
-        content: normalized.content,
+        content: pendingSaveContent,
         categories: [],
         industries: [],
         outputType: saveTargetType,

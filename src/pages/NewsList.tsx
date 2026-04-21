@@ -17,12 +17,18 @@ import {
   Trash2,
   Workflow,
 } from 'lucide-react'
-import ReactMarkdown from 'react-markdown'
 import { useAppStore } from '@/store'
 import type { NewsCategory, SavedNews } from '@/types'
 import { getCategories } from '@/lib/api/categories'
 import { deleteNews, downloadSavedFile, getSavedNews } from '@/lib/api/news'
 import { getDefaultCategories, getMockSavedNews } from '@/lib/fallbacks'
+import { ArticleContent } from '@/components/ArticleContent'
+import {
+  convertContentToHtml,
+  extractFirstImageUrl,
+  getContentExcerpt,
+  NEWS_PLACEHOLDER_IMAGE,
+} from '@/lib/utils/contentFormat'
 
 type SavedNewsWithIndustries = SavedNews & { industries?: string[] }
 
@@ -86,6 +92,14 @@ export function NewsList() {
       return { icon: FileJson, color: 'text-fuchsia-500', label: 'JSON' }
     } catch {
       if (
+        content.includes('<p') ||
+        content.includes('<h1') ||
+        content.includes('<img') ||
+        content.includes('<div')
+      ) {
+        return { icon: FileCode, color: 'text-amber-500', label: 'HTML' }
+      }
+      if (
         content.includes('```') ||
         content.includes('function ') ||
         content.includes('import ') ||
@@ -129,12 +143,12 @@ export function NewsList() {
 
     switch (format) {
       case 'md':
-        content = `# ${news.title}\n\n${news.content}`
+        content = `# ${news.title}\n\n${getContentExcerpt(news.content, news.contentFormat, Number.MAX_SAFE_INTEGER)}`
         mimeType = 'text/markdown'
         extension = 'md'
         break
       case 'txt':
-        content = `${news.title}\n\n${news.content.replace(/[#*`]/g, '')}`
+        content = `${news.title}\n\n${getContentExcerpt(news.content, news.contentFormat, Number.MAX_SAFE_INTEGER)}`
         mimeType = 'text/plain'
         extension = 'txt'
         break
@@ -142,7 +156,7 @@ export function NewsList() {
         content = JSON.stringify(
           {
             title: news.title,
-            content: news.content,
+            content: getContentExcerpt(news.content, news.contentFormat, Number.MAX_SAFE_INTEGER),
             createdAt: news.createdAt,
             updatedAt: news.updatedAt,
             isPublished: news.isPublished,
@@ -156,6 +170,11 @@ export function NewsList() {
         extension = 'json'
         break
       case 'html':
+        const htmlBody =
+          news.contentFormat === 'html'
+            ? news.content
+            : convertContentToHtml(news.content, news.contentFormat)
+
         content = `<!DOCTYPE html>
 <html>
 <head>
@@ -170,10 +189,7 @@ export function NewsList() {
 </head>
 <body>
   <h1>${news.title}</h1>
-  <div class="content">${news.content
-    .replace(/\n/g, '<br>')
-    .replace(/# (.*?)(?=\n)/g, '<h2>$1</h2>')
-    .replace(/## (.*?)(?=\n)/g, '<h3>$1</h3>')}</div>
+  <div class="content">${htmlBody}</div>
   <div class="meta">
     <p>更新时间: ${new Date(news.updatedAt).toLocaleString('zh-CN')}</p>
     ${news.isPublished ? '<p>状态: 已发布</p>' : '<p>状态: 草稿</p>'}
@@ -375,12 +391,26 @@ export function NewsList() {
               const TaskIcon = taskType.icon
               const fileType = getFileTypeIcon(news.content)
               const FileIcon = fileType.icon
+              const coverImage =
+                news.outputType === 'news'
+                  ? extractFirstImageUrl(news.content, news.contentFormat) || NEWS_PLACEHOLDER_IMAGE
+                  : NEWS_PLACEHOLDER_IMAGE
 
               return (
                 <article
                   key={news.id}
-                  className="group flex min-h-[380px] flex-col rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_22px_50px_rgba(15,23,42,0.05)] transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_26px_70px_rgba(15,23,42,0.09)]"
+                  className="group flex min-h-[440px] flex-col overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_22px_50px_rgba(15,23,42,0.05)] transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_26px_70px_rgba(15,23,42,0.09)]"
                 >
+                  <div className="relative aspect-[16/9] overflow-hidden bg-slate-100">
+                    <img
+                      src={coverImage}
+                      alt={news.title}
+                      className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-slate-950/35 via-transparent to-transparent" />
+                  </div>
+
+                  <div className="flex flex-1 flex-col p-6">
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex flex-wrap gap-2">
                       {news.isPublished ? (
@@ -437,7 +467,7 @@ export function NewsList() {
                   </div>
 
                   <p className="mt-5 line-clamp-5 text-sm leading-7 text-slate-600">
-                    {news.content.length > 220 ? `${news.content.slice(0, 220)}...` : news.content}
+                    {getContentExcerpt(news.content, news.contentFormat, 220)}
                   </p>
 
                   <div className="mt-5 grid gap-2 rounded-2xl bg-slate-50 p-4 text-sm text-slate-500 sm:grid-cols-3">
@@ -447,7 +477,7 @@ export function NewsList() {
                     </div>
                     <div className="flex items-center gap-2">
                       <FileText className="h-4 w-4 text-slate-400" />
-                      {news.content.length} 字符
+                      {getContentExcerpt(news.content, news.contentFormat, Number.MAX_SAFE_INTEGER).length} 字符
                     </div>
                     <div className="flex items-center gap-2">
                       <Share2 className="h-4 w-4 text-slate-400" />
@@ -544,6 +574,7 @@ export function NewsList() {
                       删除
                     </button>
                   </div>
+                  </div>
                 </article>
               )
             })}
@@ -620,11 +651,11 @@ export function NewsList() {
               <div className="mb-6 grid gap-3 rounded-2xl bg-slate-50 p-4 text-sm text-slate-500 sm:grid-cols-3">
                 <div>更新时间：{new Date(previewNews.updatedAt).toLocaleString('zh-CN')}</div>
                 <div>状态：{previewNews.isPublished ? '已发布' : '草稿'}</div>
-                <div>字数：{previewNews.content.length}</div>
+                <div>字数：{getContentExcerpt(previewNews.content, previewNews.contentFormat, Number.MAX_SAFE_INTEGER).length}</div>
               </div>
 
-              <article className="prose prose-slate max-w-none prose-headings:font-display prose-a:text-sky-600">
-                <ReactMarkdown>{previewNews.content}</ReactMarkdown>
+              <article className="rounded-[24px] border border-slate-100 bg-slate-50/60 p-6">
+                <ArticleContent content={previewNews.content} contentFormat={previewNews.contentFormat} />
               </article>
             </div>
           </div>

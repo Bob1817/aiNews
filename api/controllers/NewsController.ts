@@ -65,10 +65,10 @@ export class NewsController {
   // 保存新闻
   async saveNews(req: Request, res: Response) {
     try {
-      if (!req.body.title || !req.body.content) {
+      if (!req.body.content) {
         return res.status(400).json({ 
           error: '参数验证失败',
-          message: '标题和内容不能为空'
+          message: '内容不能为空'
         })
       }
       

@@ -1,5 +1,16 @@
-// 使用相对路径，让 Vite 代理处理
-const API_BASE_URL = ''
+const DEFAULT_ELECTRON_API_BASE_URL = 'http://localhost:3001'
+
+function resolveApiBaseUrl() {
+  if (typeof window === 'undefined') {
+    return DEFAULT_ELECTRON_API_BASE_URL
+  }
+
+  if (window.location.protocol === 'file:') {
+    return DEFAULT_ELECTRON_API_BASE_URL
+  }
+
+  return ''
+}
 
 export class ApiError extends Error {
   status: number
@@ -13,7 +24,11 @@ export class ApiError extends Error {
   }
 }
 
-export function apiUrl(path: string) {
+export function apiUrl(path?: string) {
+  const API_BASE_URL = resolveApiBaseUrl()
+  if (!path) {
+    return API_BASE_URL
+  }
   return `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`
 }
 
