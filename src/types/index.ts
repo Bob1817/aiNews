@@ -99,6 +99,10 @@ export interface UserConfig {
       token: string
     }
   }
+  workspace: {
+    rootPath: string
+    allowAiAccess: boolean
+  }
   createdAt: string
   updatedAt: string
 }

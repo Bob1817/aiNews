@@ -14,6 +14,7 @@ export function updateConfig(payload: {
   aiModel: UserConfig['aiModel']
   newsAPI?: UserConfig['newsAPI']
   publishPlatforms: UserConfig['publishPlatforms']
+  workspace: UserConfig['workspace']
   aiModels?: UserConfig['aiModels']
 }) {
   return apiRequest<UserConfig>('/api/config', withJsonBody(payload, { method: 'PUT' }))

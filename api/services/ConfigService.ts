@@ -1,7 +1,27 @@
+import { mkdir } from 'node:fs/promises'
+import { homedir } from 'node:os'
+import path from 'node:path'
 import { UserConfig } from '../../shared/types'
 
 export class ConfigService {
   private static userConfigs: UserConfig[] = []
+
+  private getDefaultWorkspaceRoot() {
+    return path.join(homedir(), 'Documents', 'AI助手工作台')
+  }
+
+  private normalizeWorkspace(workspace?: Partial<UserConfig['workspace']>): UserConfig['workspace'] {
+    return {
+      rootPath: workspace?.rootPath?.trim() || this.getDefaultWorkspaceRoot(),
+      allowAiAccess: workspace?.allowAiAccess ?? true,
+    }
+  }
+
+  private async ensureWorkspaceStructure(rootPath: string) {
+    await mkdir(rootPath, { recursive: true })
+    await mkdir(path.join(rootPath, 'uploads'), { recursive: true })
+    await mkdir(path.join(rootPath, 'generated'), { recursive: true })
+  }
 
   constructor() {
     // 初始化一些模拟数据
@@ -40,6 +60,7 @@ export class ConfigService {
             token: 'token_123',
           },
         },
+        workspace: this.normalizeWorkspace(),
         createdAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
         updatedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
       },
@@ -76,6 +97,13 @@ export class ConfigService {
         config.aiModels = []
         config.updatedAt = new Date().toISOString()
       }
+      if (!config.workspace) {
+        config.workspace = this.normalizeWorkspace()
+        config.updatedAt = new Date().toISOString()
+      } else {
+        config.workspace = this.normalizeWorkspace(config.workspace)
+      }
+      await this.ensureWorkspaceStructure(config.workspace.rootPath)
       return config
     }
 
@@ -98,10 +126,12 @@ export class ConfigService {
         baseUrl: 'https://newsapi.org/v2',
       },
       publishPlatforms: {},
+      workspace: this.normalizeWorkspace(),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     }
 
+    await this.ensureWorkspaceStructure(newConfig.workspace.rootPath)
     ConfigService.userConfigs.push(newConfig)
     return newConfig
   }
@@ -121,6 +151,13 @@ export class ConfigService {
     }
     if (configData.publishPlatforms) {
       config.publishPlatforms = { ...config.publishPlatforms, ...configData.publishPlatforms }
+    }
+    if (configData.workspace) {
+      config.workspace = this.normalizeWorkspace({
+        ...config.workspace,
+        ...configData.workspace,
+      })
+      await this.ensureWorkspaceStructure(config.workspace.rootPath)
     }
     if (configData.aiModels) {
       // 检查是否是第一次保存模型
@@ -145,6 +182,9 @@ export class ConfigService {
         modelName: activeModel.modelName,
         baseUrl: activeModel.baseUrl,
       }
+    }
+    if (!config.workspace) {
+      config.workspace = this.normalizeWorkspace()
     }
     config.updatedAt = new Date().toISOString()
 

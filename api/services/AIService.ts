@@ -1,3 +1,5 @@
+import { readFile, readdir, stat } from 'node:fs/promises'
+import path from 'node:path'
 import { NewsService } from './NewsService'
 import { ConfigService } from './ConfigService'
 
@@ -27,6 +29,134 @@ export class AIService {
     }
 
     return Boolean(config.apiKey && config.modelName)
+  }
+
+  private readonly workspaceTextExtensions = new Set([
+    '.txt',
+    '.md',
+    '.markdown',
+    '.json',
+    '.csv',
+    '.ts',
+    '.tsx',
+    '.js',
+    '.jsx',
+    '.py',
+    '.java',
+    '.html',
+    '.css',
+    '.yaml',
+    '.yml',
+  ])
+
+  private async collectWorkspaceFiles(rootPath: string, relativePath = '', depth = 0): Promise<Array<{
+    absolutePath: string
+    relativePath: string
+    isDirectory: boolean
+    size: number
+    modifiedAt: string
+  }>> {
+    if (depth > 2) {
+      return []
+    }
+
+    const directoryPath = relativePath ? path.join(rootPath, relativePath) : rootPath
+    const entries = await readdir(directoryPath, { withFileTypes: true })
+    const results: Array<{
+      absolutePath: string
+      relativePath: string
+      isDirectory: boolean
+      size: number
+      modifiedAt: string
+    }> = []
+
+    for (const entry of entries.slice(0, 30)) {
+      const nextRelativePath = relativePath ? path.join(relativePath, entry.name) : entry.name
+      const absolutePath = path.join(rootPath, nextRelativePath)
+      const metadata = await stat(absolutePath)
+
+      results.push({
+        absolutePath,
+        relativePath: nextRelativePath,
+        isDirectory: entry.isDirectory(),
+        size: metadata.size,
+        modifiedAt: metadata.mtime.toISOString(),
+      })
+
+      if (entry.isDirectory()) {
+        results.push(...(await this.collectWorkspaceFiles(rootPath, nextRelativePath, depth + 1)))
+      }
+    }
+
+    return results
+  }
+
+  private sanitizeFileSnippet(content: string) {
+    return content
+      .replace(/\0/g, '')
+      .replace(/\r/g, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .slice(0, 1200)
+      .trim()
+  }
+
+  private async buildWorkspaceContext(userId: string): Promise<string> {
+    try {
+      const config = await this.configService.getConfig(userId)
+      const workspace = config.workspace
+
+      if (!workspace?.allowAiAccess || !workspace.rootPath) {
+        return ''
+      }
+
+      const fileEntries = await this.collectWorkspaceFiles(workspace.rootPath)
+      if (fileEntries.length === 0) {
+        return `工程文件夹信息：\n根目录：${workspace.rootPath}\n当前目录为空。`
+      }
+
+      const fileList = fileEntries
+        .slice(0, 24)
+        .map((entry) => {
+          const typeLabel = entry.isDirectory ? '目录' : '文件'
+          const sizeLabel = entry.isDirectory ? '-' : `${Math.max(1, Math.round(entry.size / 1024))}KB`
+          return `- ${typeLabel}：${entry.relativePath}（大小：${sizeLabel}，更新于：${entry.modifiedAt.slice(0, 10)}）`
+        })
+        .join('\n')
+
+      const readableFiles = fileEntries
+        .filter((entry) => !entry.isDirectory && this.workspaceTextExtensions.has(path.extname(entry.relativePath).toLowerCase()))
+        .slice(0, 6)
+
+      const snippets = await Promise.all(
+        readableFiles.map(async (entry) => {
+          try {
+            const content = await readFile(entry.absolutePath, 'utf-8')
+            const snippet = this.sanitizeFileSnippet(content)
+            if (!snippet) {
+              return ''
+            }
+            return `文件：${entry.relativePath}\n内容摘要：\n${snippet}`
+          } catch (_error) {
+            return ''
+          }
+        })
+      )
+
+      const snippetSection = snippets.filter(Boolean).join('\n\n')
+
+      return [
+        '工程文件夹上下文：',
+        `根目录：${workspace.rootPath}`,
+        '目录内容概览：',
+        fileList,
+        snippetSection ? `\n可读文件摘要：\n${snippetSection}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n')
+    } catch (error) {
+      console.warn('读取工程文件夹上下文失败:', error)
+      return ''
+    }
   }
 
   private async resolveOllamaModelName(config: AIConfig): Promise<string> {
@@ -280,10 +410,13 @@ export class AIService {
             .join('\n')}\n\n`
         : ''
 
+    const workspaceSection = await this.buildWorkspaceContext(userId)
+    const workspacePrompt = workspaceSection ? `${workspaceSection}\n\n` : ''
+
     const content = await this.generateText(
       userId,
-      `${historySection}${fullPrompt}`,
-      '你是 AI 助手的通用对话核心，擅长帮助用户处理日常工作任务。回答要直接、清晰、可执行。'
+      `${workspacePrompt}${historySection}${fullPrompt}`,
+      '你是 AI 助手的通用对话核心，擅长帮助用户处理日常工作任务。若工程文件夹上下文存在，请优先参考其中的文件结构和内容摘要来回答。回答要直接、清晰、可执行。'
     )
 
     return { content }

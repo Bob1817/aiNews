@@ -131,6 +131,19 @@ button,
   outline-offset: 2px;
 }
 
+.chat-thread-shell {
+  width: 100%;
+  padding-left: 5rem;
+  padding-right: 5rem;
+}
+
+@media (max-width: 960px) {
+  .chat-thread-shell {
+    padding-left: 1.5rem;
+    padding-right: 1.5rem;
+  }
+}
+
 .ai-thinking-orb {
   animation: thinking-orb-float 2.4s ease-in-out infinite;
 }

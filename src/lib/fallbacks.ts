@@ -125,6 +125,7 @@ export function getDefaultConfigForm(): {
       token: string
     }
   }
+  workspace: UserConfig['workspace']
 } {
   return {
     aiModel: {
@@ -150,6 +151,10 @@ export function getDefaultConfigForm(): {
         appSecret: '',
         token: '',
       },
+    },
+    workspace: {
+      rootPath: '',
+      allowAiAccess: true,
     },
   }
 }
@@ -179,6 +184,10 @@ export function getMockConfigForm() {
         appSecret: 'secret_123',
         token: 'token_123',
       },
+    },
+    workspace: {
+      rootPath: '/Users/username/Documents/AI助手工作台',
+      allowAiAccess: true,
     },
   }
 }

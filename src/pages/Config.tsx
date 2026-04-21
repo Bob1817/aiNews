@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   ArrowLeft,
+  FolderOpen,
   CheckCircle2,
   Cpu,
   Globe,
@@ -151,6 +152,7 @@ export function Config() {
         token: string
       }
     }
+    workspace: UserConfig['workspace']
   }>({
     ...getDefaultConfigForm(),
     aiModels: [],
@@ -232,6 +234,10 @@ export function Config() {
               appSecret: data.publishPlatforms.wechat?.appSecret || '',
               token: data.publishPlatforms.wechat?.token || '',
             },
+          },
+          workspace: {
+            rootPath: data.workspace?.rootPath || '',
+            allowAiAccess: data.workspace?.allowAiAccess ?? true,
           },
         })
         await refreshActiveAiModel()
@@ -420,6 +426,7 @@ export function Config() {
           : config.aiModel,
         newsAPI: config.newsAPI,
         publishPlatforms: config.publishPlatforms,
+        workspace: config.workspace,
         aiModels: [...config.aiModels, newModelWithId],
       })
 
@@ -449,7 +456,7 @@ export function Config() {
   }
 
   const persistConfigSection = async (
-    section: 'newsAPI' | 'website' | 'wechat',
+    section: 'newsAPI' | 'website' | 'wechat' | 'workspace',
     nextConfig?: typeof config
   ) => {
     const targetConfig = nextConfig || config
@@ -462,6 +469,7 @@ export function Config() {
         aiModels: targetConfig.aiModels,
         newsAPI: targetConfig.newsAPI,
         publishPlatforms: targetConfig.publishPlatforms,
+        workspace: targetConfig.workspace,
       })
 
       setConfig({
@@ -487,12 +495,18 @@ export function Config() {
             token: updatedConfig.publishPlatforms.wechat?.token || '',
           },
         },
+        workspace: {
+          rootPath: updatedConfig.workspace?.rootPath || '',
+          allowAiAccess: updatedConfig.workspace?.allowAiAccess ?? true,
+        },
       })
       await refreshActiveAiModel()
 
       const sectionName =
         section === 'newsAPI'
           ? '新闻源配置'
+          : section === 'workspace'
+            ? '工作文件配置'
           : section === 'website'
             ? '官网发布配置'
             : '公众号发布配置'
@@ -604,8 +618,9 @@ export function Config() {
             : activeAiModel?.configuredModelName || activeAiModel?.configuredName || '未设置',
       },
       { label: '新闻源', value: config.newsAPI?.provider || '未设置' },
+      { label: '工作目录', value: config.workspace.rootPath ? '已配置' : '未设置' },
     ],
-    [activeAiModel, config.aiModels.length, config.newsAPI?.provider]
+    [activeAiModel, config.aiModels.length, config.newsAPI?.provider, config.workspace.rootPath]
   )
 
   return (
@@ -767,6 +782,83 @@ export function Config() {
                   )}
                 </div>
               )}
+            </ConfigCard>
+
+            <ConfigCard
+              icon={<FolderOpen className="h-5 w-5" />}
+              title="工作文件配置"
+              description="安装程序后会默认创建一个工程文件夹，用于存放上传文件、生成文件和任务相关材料。AI 对话时可以读取该目录的文件信息来辅助问答与任务执行。"
+              action={
+                <button
+                  onClick={() => void persistConfigSection('workspace')}
+                  disabled={savingSection === 'workspace'}
+                  className="focus-ring inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-3 text-sm text-white transition-colors hover:bg-slate-800 disabled:opacity-60"
+                >
+                  {savingSection === 'workspace' ? '保存中...' : '保存工作文件配置'}
+                </button>
+              }
+            >
+              <div className="grid gap-4 md:grid-cols-2">
+                <Field
+                  label="工程文件夹"
+                  hint="默认用于存放任务相关文件；如果你不修改这里，系统会自动使用默认目录 `~/Documents/AI助手工作台`，并创建 uploads 与 generated 子目录。"
+                >
+                  <input
+                    type="text"
+                    value={config.workspace.rootPath}
+                    onChange={(e) =>
+                      setConfig((current) => ({
+                        ...current,
+                        workspace: {
+                          ...current.workspace,
+                          rootPath: e.target.value,
+                        },
+                      }))
+                    }
+                    placeholder="留空则使用默认目录：~/Documents/AI助手工作台"
+                    className={inputClassName()}
+                  />
+                </Field>
+                <Field
+                  label="AI 文件访问"
+                  hint="开启后，AI 在聊天时会读取该目录的文件清单和可读文本摘要，用于辅助任务与问答。"
+                >
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setConfig((current) => ({
+                        ...current,
+                        workspace: {
+                          ...current.workspace,
+                          allowAiAccess: !current.workspace.allowAiAccess,
+                        },
+                      }))
+                    }
+                    className={`focus-ring flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-sm transition-colors ${
+                      config.workspace.allowAiAccess
+                        ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                        : 'border-slate-200 bg-slate-50 text-slate-700'
+                    }`}
+                  >
+                    <span>{config.workspace.allowAiAccess ? '已开启 AI 访问工作目录' : '已关闭 AI 访问工作目录'}</span>
+                    <span className="text-xs">{config.workspace.allowAiAccess ? 'ON' : 'OFF'}</span>
+                  </button>
+                </Field>
+              </div>
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                  <p className="text-xs uppercase tracking-[0.18em] text-editorial-muted">上传文件目录</p>
+                  <p className="mt-2 break-all text-sm font-medium text-slate-900">
+                    {config.workspace.rootPath ? `${config.workspace.rootPath}/uploads` : '~/Documents/AI助手工作台/uploads'}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                  <p className="text-xs uppercase tracking-[0.18em] text-editorial-muted">生成文件目录</p>
+                  <p className="mt-2 break-all text-sm font-medium text-slate-900">
+                    {config.workspace.rootPath ? `${config.workspace.rootPath}/generated` : '~/Documents/AI助手工作台/generated'}
+                  </p>
+                </div>
+              </div>
             </ConfigCard>
 
             <ConfigCard

@@ -523,7 +523,7 @@ export function Chat() {
               </div>
             </div>
           ) : (
-            <div className="mx-auto w-full max-w-5xl space-y-6" style={{ contentVisibility: 'auto' }}>
+            <div className="chat-thread-shell w-full space-y-6" style={{ contentVisibility: 'auto' }}>
               {conversationMessages.map((message) => (
                 <ConversationItem
                   key={message.id}
@@ -569,7 +569,7 @@ export function Chat() {
         </div>
 
         <div className="border-t border-slate-200 bg-white px-6 py-5">
-          <div className="mx-auto flex max-w-5xl flex-col gap-3">
+          <div className="chat-thread-shell flex flex-col gap-3">
             <div className="flex flex-wrap items-center gap-3">
               {selectedWorkflow && (
                 <button
