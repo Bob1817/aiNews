@@ -1,4 +1,4 @@
-import type { NewsArticle, SavedNews } from '@/types'
+import type { NewsArticle, SavedNews, WorkbookData, WorkbookUpdatePayload } from '@/types'
 import { apiRequest, apiUrl } from '@/lib/api'
 import { getMockNewsArticles, getMockSavedNews } from '@/lib/fallbacks'
 
@@ -43,6 +43,22 @@ export async function getRecentNews(userId: string, forceRefresh: boolean = fals
 // 内存存储，用于保存修改后的新闻数据
 let savedNewsMemory: SavedNews[] = []
 
+function normalizeSavedNewsPayload(value: unknown): SavedNews[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value.filter(
+    (item): item is SavedNews =>
+      !!item &&
+      typeof item === 'object' &&
+      typeof item.id === 'string' &&
+      typeof item.userId === 'string' &&
+      typeof item.title === 'string' &&
+      typeof item.content === 'string'
+  )
+}
+
 export async function getSavedNews(userId: string) {
   try {
     console.log('开始获取保存的新闻...')
@@ -52,10 +68,11 @@ export async function getSavedNews(userId: string) {
         'Content-Type': 'application/json',
       },
     })
-    console.log('获取到保存的新闻:', news)
+    const normalizedNews = normalizeSavedNewsPayload(news)
+    console.log('获取到保存的新闻:', normalizedNews)
     // 更新内存存储
-    savedNewsMemory = news
-    return news
+    savedNewsMemory = normalizedNews
+    return normalizedNews
   } catch (error) {
     console.error('获取保存的新闻失败:', error)
     // 出错时如果内存中有数据，使用内存数据，否则使用模拟数据
@@ -73,7 +90,7 @@ export async function getSavedNews(userId: string) {
 
 // 更新内存中的新闻数据
 export function updateSavedNewsMemory(news: SavedNews[]) {
-  savedNewsMemory = news
+  savedNewsMemory = normalizeSavedNewsPayload(news)
 }
 
 export async function createSavedNews(payload: {
@@ -85,7 +102,7 @@ export async function createSavedNews(payload: {
   originalNewsId?: string
   originalNewsUrl?: string
   outputType?: 'news' | 'file'
-  fileFormat?: 'md' | 'txt' | 'json' | 'html'
+  fileFormat?: 'md' | 'txt' | 'json' | 'html' | 'xlsx'
   contentFormat?: 'html' | 'markdown' | 'plain'
 }) {
   try {
@@ -129,6 +146,35 @@ export function downloadSavedFile(news: SavedNews) {
   link.click()
   document.body.removeChild(link)
   URL.revokeObjectURL(url)
+}
+
+export async function getSavedWorkbook(id: string) {
+  const result = await apiRequest<{ success: boolean; message: string; data: WorkbookData }>(
+    `/api/news/saved/${id}/workbook`,
+    {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    }
+  )
+
+  return result.data
+}
+
+export async function updateSavedWorkbook(id: string, payload: WorkbookUpdatePayload) {
+  const result = await apiRequest<{ success: boolean; message: string; data: WorkbookData }>(
+    `/api/news/saved/${id}/workbook`,
+    {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    }
+  )
+
+  return result.data
 }
 
 export async function updateSavedNews(

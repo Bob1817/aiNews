@@ -14,6 +14,7 @@ const workflow_1 = require("./routes/workflow");
 const ScheduledService_1 = require("./services/ScheduledService");
 const app = (0, express_1.default)();
 const PORT = index_1.env.PORT;
+const HOST = index_1.env.HOST || '0.0.0.0';
 // 基础中间件
 app.use(express_1.default.json({ limit: '10mb' }));
 app.use(express_1.default.urlencoded({ extended: true, limit: '10mb' }));
@@ -54,12 +55,12 @@ app.use((err, _req, res, _next) => {
 // 初始化定时任务服务
 new ScheduledService_1.ScheduledService();
 // 启动服务器
-app.listen(PORT, () => {
+app.listen(PORT, HOST, () => {
     console.log('🚀 AI Assistant API 服务器启动成功');
     console.log('='.repeat(50));
     console.log(`端口: ${PORT}`);
     console.log(`环境: ${index_1.env.NODE_ENV}`);
-    console.log(`地址: http://${index_1.env.HOST}:${PORT}`);
+    console.log(`地址: http://${HOST}:${PORT}`);
     console.log('='.repeat(50));
 });
 // 处理未捕获的异常

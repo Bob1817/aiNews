@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ConfigController = void 0;
+const node_child_process_1 = require("node:child_process");
 const promises_1 = require("node:fs/promises");
 const node_path_1 = __importDefault(require("node:path"));
 const ConfigService_1 = require("../services/ConfigService");
@@ -19,6 +20,29 @@ class ConfigController {
             ext: ext || '',
             safeBaseName,
         };
+    }
+    shouldIgnoreImportedPath(relativePath) {
+        const normalized = relativePath.replace(/\\/g, '/');
+        const segments = normalized.split('/').filter(Boolean).map((item) => item.toLowerCase());
+        return segments.includes('output') || segments.includes('generated');
+    }
+    async collectImportableFiles(rootPath, currentPath, files = []) {
+        const entries = await (0, promises_1.readdir)(currentPath, { withFileTypes: true });
+        for (const entry of entries) {
+            const absolutePath = node_path_1.default.join(currentPath, entry.name);
+            const relativePath = node_path_1.default.relative(rootPath, absolutePath);
+            if (this.shouldIgnoreImportedPath(relativePath)) {
+                continue;
+            }
+            if (entry.isDirectory()) {
+                await this.collectImportableFiles(rootPath, absolutePath, files);
+                continue;
+            }
+            if (entry.isFile() && /\.(xlsx|xls)$/i.test(entry.name)) {
+                files.push(absolutePath);
+            }
+        }
+        return files;
     }
     async resolveOllamaModelName(aiModel) {
         if (aiModel.modelName?.trim()) {
@@ -332,6 +356,65 @@ class ConfigController {
             });
         }
     }
+    async importWorkspaceFolder(req, res) {
+        try {
+            const { userId, folderPath } = req.body;
+            if (!userId || !folderPath) {
+                return res.status(400).json({
+                    error: '参数错误',
+                    message: '请提供 userId 和 folderPath',
+                });
+            }
+            const sourceStat = await (0, promises_1.stat)(folderPath);
+            if (!sourceStat.isDirectory()) {
+                return res.status(400).json({
+                    error: '参数错误',
+                    message: '请选择有效的文件夹',
+                });
+            }
+            const config = await this.configService.getConfig(userId);
+            const uploadsDir = node_path_1.default.join(config.workspace.rootPath, 'uploads');
+            await (0, promises_1.mkdir)(uploadsDir, { recursive: true });
+            const sourceFiles = await this.collectImportableFiles(folderPath, folderPath);
+            if (sourceFiles.length === 0) {
+                return res.status(400).json({
+                    error: '未找到文件',
+                    message: '所选文件夹中没有可用的 Excel 文件',
+                });
+            }
+            const assets = [];
+            for (const sourceFile of sourceFiles) {
+                const originalFileName = node_path_1.default.basename(sourceFile);
+                const { ext, safeBaseName } = this.sanitizeFileName(originalFileName);
+                const savedFileName = `${safeBaseName}-${Date.now()}-${assets.length}${ext}`;
+                const savedFilePath = node_path_1.default.join(uploadsDir, savedFileName);
+                await (0, promises_1.copyFile)(sourceFile, savedFilePath);
+                assets.push({
+                    fileName: savedFileName,
+                    originalFileName,
+                    filePath: savedFilePath,
+                    relativePath: `uploads/${savedFileName}`,
+                    mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                });
+            }
+            return res.json({
+                success: true,
+                message: '文件夹导入成功',
+                data: {
+                    folderName: node_path_1.default.basename(folderPath),
+                    folderPath,
+                    assets,
+                },
+            });
+        }
+        catch (error) {
+            console.error('导入本地文件夹失败:', error);
+            return res.status(500).json({
+                error: '导入本地文件夹失败',
+                message: error instanceof Error ? error.message : '未知错误',
+            });
+        }
+    }
     async getWorkspaceAsset(req, res) {
         try {
             const userId = String(req.query.userId || '');
@@ -363,6 +446,50 @@ class ConfigController {
             console.error('读取工作文件失败:', error);
             return res.status(500).json({
                 error: '读取工作文件失败',
+                message: error instanceof Error ? error.message : '未知错误',
+            });
+        }
+    }
+    async openWorkspaceFolder(req, res) {
+        try {
+            const { userId, relativePath } = req.body;
+            if (!userId || !relativePath) {
+                return res.status(400).json({
+                    error: '参数错误',
+                    message: '请提供 userId 和 relativePath',
+                });
+            }
+            const config = await this.configService.getConfig(userId);
+            const uploadsDir = node_path_1.default.resolve(config.workspace.rootPath, 'uploads');
+            const absolutePath = node_path_1.default.resolve(config.workspace.rootPath, relativePath);
+            if (!absolutePath.startsWith(`${uploadsDir}${node_path_1.default.sep}`) && absolutePath !== uploadsDir) {
+                return res.status(403).json({
+                    error: '访问被拒绝',
+                    message: '无权打开该目录',
+                });
+            }
+            const folderStat = await (0, promises_1.stat)(absolutePath);
+            if (!folderStat.isDirectory()) {
+                return res.status(400).json({
+                    error: '参数错误',
+                    message: '目标路径不是文件夹',
+                });
+            }
+            const command = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'explorer' : 'xdg-open';
+            const child = (0, node_child_process_1.spawn)(command, [absolutePath], {
+                detached: true,
+                stdio: 'ignore',
+            });
+            child.unref();
+            return res.json({
+                success: true,
+                message: '文件夹已打开',
+            });
+        }
+        catch (error) {
+            console.error('打开工作区目录失败:', error);
+            return res.status(500).json({
+                error: '打开工作区目录失败',
                 message: error instanceof Error ? error.message : '未知错误',
             });
         }

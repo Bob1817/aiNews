@@ -14,6 +14,7 @@ export class ConfigService {
     return {
       rootPath: workspace?.rootPath?.trim() || this.getDefaultWorkspaceRoot(),
       allowAiAccess: workspace?.allowAiAccess ?? true,
+      localWorkflowOnly: workspace?.localWorkflowOnly ?? false,
     }
   }
 
@@ -163,6 +164,8 @@ export class ConfigService {
     }
     if (!config.workspace) {
       config.workspace = this.normalizeWorkspace()
+    } else {
+      config.workspace = this.normalizeWorkspace(config.workspace)
     }
     config.updatedAt = new Date().toISOString()
 

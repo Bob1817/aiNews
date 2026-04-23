@@ -4,6 +4,7 @@ import { Sidebar } from './components/Sidebar'
 import { Chat } from './pages/Chat'
 import { NewsList } from './pages/NewsList'
 import { NewsEdit } from './pages/NewsEdit'
+import { SavedFileWorkbench } from './pages/SavedFileWorkbench'
 import { Login } from './pages/Login'
 import { Register } from './pages/Register'
 import { Settings } from './pages/Settings'
@@ -47,6 +48,7 @@ function App() {
             <Route path="/workflows" element={<Workflows />} />
             <Route path="/news" element={<NewsList />} />
             <Route path="/news/edit/:id?" element={<NewsEdit />} />
+            <Route path="/news/file/:id" element={<SavedFileWorkbench />} />
             <Route path="/history" element={<History />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/config" element={<Config />} />

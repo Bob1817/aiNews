@@ -1,13 +1,43 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.WorkflowExecutionService = void 0;
+const node_path_1 = __importDefault(require("node:path"));
 const AICrawlerService_1 = require("./AICrawlerService");
 const AIService_1 = require("./AIService");
+const ConfigService_1 = require("./ConfigService");
 const NewsService_1 = require("./NewsService");
+const SavedNewsService_1 = require("./SavedNewsService");
+const TaxReportWorkflowService_1 = require("./TaxReportWorkflowService");
 const UserService_1 = require("./UserService");
 const WorkflowCommandService_1 = require("./WorkflowCommandService");
 const WorkflowService_1 = require("./WorkflowService");
 class WorkflowExecutionService {
+    hasConfiguredAIModel(aiModel) {
+        if (!aiModel?.provider) {
+            return false;
+        }
+        switch (aiModel.provider) {
+            case 'ollama':
+            case 'llamacpp':
+                return Boolean(aiModel.modelName || aiModel.baseUrl);
+            case 'openai':
+            case 'anthropic':
+            case 'google':
+                return Boolean(aiModel.apiKey && aiModel.modelName);
+            default:
+                return false;
+        }
+    }
+    hasUsableAiModel(config) {
+        if (this.hasConfiguredAIModel(config.aiModel)) {
+            return true;
+        }
+        const fallbackModel = config.aiModels?.find((item) => item.isActive) || config.aiModels?.[0];
+        return this.hasConfiguredAIModel(fallbackModel);
+    }
     constructor() {
         this.keywordNoise = new Set([
             '新闻',
@@ -41,7 +71,10 @@ class WorkflowExecutionService {
         this.aiService = new AIService_1.AIService();
         this.aiCrawlerService = new AICrawlerService_1.AICrawlerService();
         this.newsService = new NewsService_1.NewsService();
+        this.savedNewsService = new SavedNewsService_1.SavedNewsService();
         this.userService = new UserService_1.UserService();
+        this.configService = new ConfigService_1.ConfigService();
+        this.taxReportWorkflowService = new TaxReportWorkflowService_1.TaxReportWorkflowService();
     }
     async listExecutions(userId) {
         return WorkflowExecutionService.executions
@@ -62,6 +95,7 @@ class WorkflowExecutionService {
             userId: input.userId,
             parsed,
             message: input.message,
+            uploadedAssetPaths: input.uploadedAssetPaths,
             referencedNewsId: input.referencedNewsId,
             history: input.history,
         });
@@ -70,6 +104,10 @@ class WorkflowExecutionService {
         const workflow = input.parsed.workflow;
         if (!workflow) {
             throw new Error('工作流不存在');
+        }
+        const config = await this.configService.getConfig(input.userId);
+        if (workflow.executionMode === 'ai' && (config.workspace.localWorkflowOnly || !this.hasUsableAiModel(config))) {
+            throw new Error('当前未配置可用 AI 模型，该工作流暂不可用');
         }
         const execution = {
             id: `execution-${Date.now()}`,
@@ -85,17 +123,15 @@ class WorkflowExecutionService {
         };
         WorkflowExecutionService.executions.unshift(execution);
         try {
-            const content = workflow.id === 'workflow-news-digest'
-                ? await this.buildNewsDigest(input.userId, input.parsed.remainingInput || input.message)
-                : await this.generateWorkflowContent(workflow, input.userId, input.parsed.remainingInput || input.message, input.referencedNewsId, input.history);
-            const artifacts = [
-                {
-                    id: `artifact-${Date.now()}`,
-                    type: workflow.id === 'workflow-news-assistant' ? 'news-draft' : 'markdown',
-                    title: `${workflow.displayName} 输出`,
-                    content,
-                },
-            ];
+            const { content, artifacts } = await this.buildWorkflowResult({
+                executionId: execution.id,
+                workflow,
+                userId: input.userId,
+                message: input.parsed.remainingInput || input.message,
+                uploadedAssetPaths: input.uploadedAssetPaths,
+                referencedNewsId: input.referencedNewsId,
+                history: input.history,
+            });
             execution.output = content;
             execution.status = 'completed';
             execution.artifacts = artifacts;
@@ -121,6 +157,87 @@ class WorkflowExecutionService {
         const systemPrompt = this.buildSystemPrompt(workflow);
         return this.aiService.generateText(userId, `${historySection}${prompt}`, systemPrompt);
     }
+    async buildWorkflowResult(input) {
+        const { workflow } = input;
+        if (workflow.id === 'workflow-tax-report') {
+            return this.buildTaxReportResult(input);
+        }
+        const content = workflow.id === 'workflow-news-digest'
+            ? await this.buildNewsDigest(input.userId, input.message)
+            : await this.generateWorkflowContent(workflow, input.userId, input.message, input.referencedNewsId, input.history);
+        const artifacts = [
+            {
+                id: `artifact-${Date.now()}`,
+                type: workflow.id === 'workflow-news-assistant' ? 'news-draft' : 'markdown',
+                title: `${workflow.displayName} 输出`,
+                content,
+            },
+        ];
+        return { content, artifacts };
+    }
+    buildTaxReportSavedTitle() {
+        const timestamp = new Date()
+            .toLocaleString('zh-CN', { hour12: false })
+            .replace(/\//g, '-');
+        return `个税申报表 ${timestamp}`;
+    }
+    async buildTaxReportResult(input) {
+        const uploadedAssetPaths = (input.uploadedAssetPaths || []).filter((item) => item.endsWith('.xlsx') || item.endsWith('.xls'));
+        if (uploadedAssetPaths.length === 0) {
+            throw new Error('请先上传包含发放记录表和结算发放表的文件夹');
+        }
+        const config = await this.configService.getConfig(input.userId);
+        const result = await this.taxReportWorkflowService.generateReport({
+            workspaceRootPath: config.workspace.rootPath,
+            uploadedRelativePaths: uploadedAssetPaths,
+        });
+        const artifactId = `artifact-${Date.now()}`;
+        const outputFolderPath = node_path_1.default.join(config.workspace.rootPath, 'uploads', 'generated');
+        const encodedOutputFolderPath = Buffer.from(outputFolderPath, 'utf8').toString('base64url');
+        const downloadUrl = `/api/workflows/executions/${encodeURIComponent(input.executionId)}/artifacts/${encodeURIComponent(artifactId)}/download?userId=${encodeURIComponent(input.userId)}`;
+        const content = [
+            '# 合并数据成功',
+            '',
+            `- 识别发放记录表：${result.summary.totalPayoutFiles} 个`,
+            `- 识别结算发放表：${result.summary.totalSettlementFiles} 个`,
+            `- 合并人员数量：${result.summary.totalEmployees} 人`,
+            ...(result.summary.warnings.length > 0 ? ['', '告警：', ...result.summary.warnings.map((item) => `- ${item}`)] : []),
+            '',
+            `[下载合并结果](${downloadUrl})`,
+            `[查看 output 文件夹](action:open-output-folder:${encodedOutputFolderPath})`,
+        ].join('\n');
+        const artifacts = [
+            {
+                id: artifactId,
+                type: 'file',
+                title: result.outputFileName,
+                content,
+                fileName: result.outputFileName,
+                filePath: result.outputFilePath,
+                downloadUrl,
+                mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                metadata: {
+                    ...result.summary,
+                    outputFolderPath,
+                },
+            },
+        ];
+        await this.savedNewsService.registerGeneratedFile({
+            userId: input.userId,
+            title: this.buildTaxReportSavedTitle(),
+            content: [
+                '个税报表工作流已生成标准申报表文件。',
+                `识别发放记录表：${result.summary.totalPayoutFiles} 个`,
+                `识别结算发放表：${result.summary.totalSettlementFiles} 个`,
+                `合并人员数量：${result.summary.totalEmployees} 人`,
+            ].join('\n'),
+            fileName: result.outputFileName,
+            filePath: result.outputFilePath,
+            downloadUrl,
+            fileFormat: 'xlsx',
+        });
+        return { content, artifacts };
+    }
     async getParsedWorkflowFromId(workflowId, invocation, message) {
         const workflow = await this.workflowService.getWorkflowById(workflowId);
         if (!workflow) {
@@ -135,6 +252,17 @@ class WorkflowExecutionService {
             remainingInput: message,
             workflow,
         };
+    }
+    async getExecutionArtifact(userId, executionId, artifactId) {
+        const execution = WorkflowExecutionService.executions.find((item) => item.id === executionId && item.userId === userId);
+        if (!execution) {
+            throw new Error('执行记录不存在');
+        }
+        const artifact = execution.artifacts.find((item) => item.id === artifactId);
+        if (!artifact || artifact.type !== 'file' || !artifact.filePath || !artifact.fileName) {
+            throw new Error('文件产物不存在');
+        }
+        return artifact;
     }
     buildSystemPrompt(workflow) {
         const steps = workflow.steps

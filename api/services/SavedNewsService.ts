@@ -1,6 +1,7 @@
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { SavedNews } from '../../shared/types'
+import XLSX from 'xlsx'
+import { SavedNews, WorkbookData, WorkbookUpdatePayload } from '../../shared/types'
 import { AICrawlerService } from './AICrawlerService'
 import { ConfigService } from './ConfigService'
 import { normalizeSavedNewsContent } from './newsContentNormalizer'
@@ -116,6 +117,8 @@ export class SavedNewsService {
     const normalizedNewsContent = normalizeSavedNewsContent({
       title: data.title,
       content: resolvedContent,
+    }, {
+      preferPlainTextBody: outputType === 'news',
     })
     const newNews: SavedNews = {
       id,
@@ -157,6 +160,78 @@ export class SavedNewsService {
 
     SavedNewsService.savedNews.push(newNews)
     return newNews
+  }
+
+  async registerGeneratedFile(data: {
+    userId: string
+    title: string
+    content: string
+    fileName: string
+    filePath: string
+    downloadUrl: string
+    fileFormat: 'xlsx'
+    categories?: string[]
+    industries?: string[]
+  }): Promise<SavedNews> {
+    const id = Date.now().toString()
+    const newNews: SavedNews = {
+      id,
+      userId: data.userId,
+      title: data.title.trim() || '个税申报表',
+      content: data.content.trim(),
+      contentFormat: 'plain',
+      outputType: 'file',
+      fileName: data.fileName,
+      fileFormat: data.fileFormat,
+      filePath: data.filePath,
+      downloadUrl: data.downloadUrl,
+      isPublished: false,
+      publishedTo: [],
+      categories: data.categories || [],
+      industries: data.industries || [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }
+
+    SavedNewsService.savedNews.push(newNews)
+    return newNews
+  }
+
+  async getWorkbookBySavedNewsId(id: string): Promise<WorkbookData> {
+    const news = await this.getSavedNewsById(id)
+    if (!news || news.outputType !== 'file' || news.fileFormat !== 'xlsx' || !news.filePath) {
+      throw new Error('当前文件不支持工作簿预览')
+    }
+
+    const workbook = XLSX.readFile(news.filePath)
+    const sheets = workbook.SheetNames.map((sheetName) => ({
+      name: sheetName,
+      rows: XLSX.utils.sheet_to_json<string[]>(workbook.Sheets[sheetName], {
+        header: 1,
+        raw: false,
+        defval: '',
+      }),
+    }))
+
+    return {
+      file: news,
+      sheetNames: workbook.SheetNames,
+      sheets,
+    }
+  }
+
+  async updateWorkbookBySavedNewsId(id: string, payload: WorkbookUpdatePayload): Promise<WorkbookData> {
+    const news = await this.getSavedNewsById(id)
+    if (!news || news.outputType !== 'file' || news.fileFormat !== 'xlsx' || !news.filePath) {
+      throw new Error('当前文件不支持工作簿编辑')
+    }
+
+    const workbook = XLSX.readFile(news.filePath)
+    workbook.Sheets[payload.sheetName] = XLSX.utils.aoa_to_sheet(payload.rows)
+    XLSX.writeFile(workbook, news.filePath)
+    news.updatedAt = new Date().toISOString()
+
+    return this.getWorkbookBySavedNewsId(id)
   }
 
   // 更新新闻
@@ -203,8 +278,14 @@ export class SavedNewsService {
 
   // 删除新闻
   async deleteNews(id: string): Promise<boolean> {
+    const target = SavedNewsService.savedNews.find((news) => news.id === id)
     const initialLength = SavedNewsService.savedNews.length
     SavedNewsService.savedNews = SavedNewsService.savedNews.filter((news) => news.id !== id)
+
+    if (target?.outputType === 'file' && target.filePath) {
+      await rm(target.filePath, { force: true })
+    }
+
     return SavedNewsService.savedNews.length < initialLength
   }
 }

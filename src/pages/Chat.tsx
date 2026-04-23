@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Bot, ChevronDown, FileImage, FileText, FolderOpen, Newspaper, Plus, Send, Server, Settings, Workflow } from 'lucide-react'
-import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { Bot, ChevronDown, FileImage, FileText, FolderOpen, Newspaper, Plus, Send, Workflow } from 'lucide-react'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { ConversationItem } from '@/components/ConversationItem'
 import { useToast } from '@/lib/toast'
 import { useAppStore } from '@/store'
@@ -17,8 +17,10 @@ import type {
 import { chat as chatWithAi } from '@/lib/api/chat'
 import { getErrorMessage } from '@/lib/errors'
 import { createSavedNews } from '@/lib/api/news'
-import { getConfig, switchAIModel, updateConfig, uploadWorkspaceAsset } from '@/lib/api/config'
-import { parseWorkflowCommand, getWorkflowExecutions, getWorkflows } from '@/lib/api/workflows'
+import { getConfig, importWorkspaceFolder, openWorkspaceFolder, switchAIModel, updateConfig, uploadWorkspaceAsset } from '@/lib/api/config'
+import { executeWorkflow, parseWorkflowCommand, getWorkflowExecutions, getWorkflows } from '@/lib/api/workflows'
+import { buildNewsAssistantDraftTask, findNewsAssistantWorkflow } from '@/lib/utils/newsAssistant'
+import { canUseWorkflow, getVisibleWorkflows } from '@/lib/utils/workflowAccess'
 
 const thinkingMessages = [
   '正在理解你的问题',
@@ -88,6 +90,18 @@ function getPathLeafLabel(filePath?: string) {
   return segments[segments.length - 1] || filePath
 }
 
+function toWorkspaceRelativePath(rootPath: string, targetPath: string) {
+  const normalize = (value: string) => value.replace(/\\/g, '/').replace(/\/+$/, '')
+  const normalizedRoot = normalize(rootPath)
+  const normalizedTarget = normalize(targetPath)
+
+  if (!normalizedRoot || !normalizedTarget.startsWith(`${normalizedRoot}/`)) {
+    return 'uploads/generated'
+  }
+
+  return normalizedTarget.slice(normalizedRoot.length + 1)
+}
+
 function clampChatText(value: string, maxChars: number) {
   const normalized = value.replace(/\r/g, '').replace(/\n{3,}/g, '\n\n').trim()
   if (normalized.length <= maxChars) {
@@ -103,7 +117,12 @@ export function Chat() {
     rawMessage: string
     requestMessage: string
     workflow: WorkflowDefinition | null
+    uploadedAssetPaths?: string[]
+    uploadedFolderName?: string
+    uploadedFileNames?: string[]
     referencedNews?: NewsArticle | null
+    requestMode?: 'chat' | 'workflow'
+    autoSaveGeneratedNews?: boolean
     createdAt: string
   }
 
@@ -111,13 +130,19 @@ export function Chat() {
     fileName: string
     relativePath: string
     mimeType: string
+    originalFileName?: string
+  }
+
+  type ImportedFolderSelection = {
+    folderName: string
+    folderPath: string
+    assets: UploadedAsset[]
   }
 
   const location = useLocation()
   const navigate = useNavigate()
   const { conversationId } = useParams<{ conversationId?: string }>()
   const [inputMessage, setInputMessage] = useState('')
-  const [hasAiModelConfig, setHasAiModelConfig] = useState(true)
   const [isCheckingConfig, setIsCheckingConfig] = useState(true)
   const [isSavingToDraft, setIsSavingToDraft] = useState(false)
   const [showWorkflowSuggestions, setShowWorkflowSuggestions] = useState(false)
@@ -136,28 +161,24 @@ export function Chat() {
   const [isUpdatingWorkspace, setIsUpdatingWorkspace] = useState(false)
   const [isUploadingAsset, setIsUploadingAsset] = useState(false)
   const [uploadedAssets, setUploadedAssets] = useState<UploadedAsset[]>([])
-  const [modelCheckDetails, setModelCheckDetails] = useState<{
-    primaryLabel: string
-    primaryReady: boolean
-    fallbackLabel: string
-    fallbackReady: boolean
-    lastError: string
-  }>({
-    primaryLabel: '未检测到主模型配置',
-    primaryReady: false,
-    fallbackLabel: '未检测到候选模型',
-    fallbackReady: false,
-    lastError: '',
-  })
+  const [taxFolderSelection, setTaxFolderSelection] = useState<ImportedFolderSelection | null>(null)
+  const [isSelectingTaxFolder, setIsSelectingTaxFolder] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const plusMenuRef = useRef<HTMLDivElement>(null)
   const modelMenuRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const imageInputRef = useRef<HTMLInputElement>(null)
+  const folderInputRef = useRef<HTMLInputElement>(null)
   const conversationMessagesRef = useRef<ConversationMessage[]>([])
   const conversationHistoriesRef = useRef<ConversationHistory[]>([])
   const currentConversationIdRef = useRef<string | null>(null)
   const conversationIdRef = useRef<string | undefined>(conversationId)
+  const pendingTaxSubmissionRef = useRef<{
+    rawMessage: string
+    requestMessage: string
+    workflow: WorkflowDefinition
+    createdAt: string
+  } | null>(null)
   const { showToast } = useToast()
   const {
     conversationMessages,
@@ -180,13 +201,27 @@ export function Chat() {
     startNewConversation,
   } = useAppStore()
 
+  const messageList = Array.isArray(conversationMessages) ? conversationMessages : []
+  const historyList = Array.isArray(conversationHistories) ? conversationHistories : []
+  const workflowList = Array.isArray(workflows) ? workflows : []
+  const assetList = Array.isArray(uploadedAssets) ? uploadedAssets : []
+  const queuedSubmissionList = Array.isArray(queuedSubmissions) ? queuedSubmissions : []
+
   const configuredAiModels = useMemo(
     () => (configSnapshot?.aiModels || []).filter((model) => isModelReady(model)),
     [configSnapshot]
   )
+  const configuredModelList = Array.isArray(configuredAiModels) ? configuredAiModels : []
 
   const currentWorkspacePath = configSnapshot?.workspace?.rootPath || ''
   const currentWorkspaceLabel = getPathLeafLabel(currentWorkspacePath)
+  const localWorkflowOnly = Boolean(configSnapshot?.workspace?.localWorkflowOnly)
+  const canUseAiChat = Boolean(activeAiModel) && !localWorkflowOnly
+  const isTaxReportWorkflow = selectedWorkflow?.id === 'workflow-tax-report'
+  const folderInputAttributes = {
+    webkitdirectory: '',
+    directory: '',
+  } as Record<string, string>
   const currentModelLabel =
     activeAiModel?.effectiveModelName ||
     activeAiModel?.configuredModelName ||
@@ -194,12 +229,12 @@ export function Chat() {
     '未设置模型'
 
   useEffect(() => {
-    conversationMessagesRef.current = conversationMessages
-  }, [conversationMessages])
+    conversationMessagesRef.current = messageList
+  }, [messageList])
 
   useEffect(() => {
-    conversationHistoriesRef.current = conversationHistories
-  }, [conversationHistories])
+    conversationHistoriesRef.current = historyList
+  }, [historyList])
 
   useEffect(() => {
     currentConversationIdRef.current = currentConversationId
@@ -211,7 +246,7 @@ export function Chat() {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [conversationMessages, isLoading])
+  }, [messageList, isLoading])
 
   useEffect(() => {
     const handlePointerDown = (event: MouseEvent) => {
@@ -245,7 +280,7 @@ export function Chat() {
     if (conversationId === 'new') {
       if (
         currentConversationId !== null ||
-        conversationMessages.length > 0 ||
+        messageList.length > 0 ||
         selectedWorkflow !== null
       ) {
         startNewConversation()
@@ -257,7 +292,7 @@ export function Chat() {
       return
     }
 
-    const history = conversationHistories.find((item) => item.id === conversationId)
+    const history = historyList.find((item) => item.id === conversationId)
     if (!history || currentConversationId === history.id) {
       return
     }
@@ -266,9 +301,9 @@ export function Chat() {
     loadConversationMessages(history.messages)
   }, [
     currentConversationId,
-    conversationHistories,
+    historyList,
     conversationId,
-    conversationMessages,
+    messageList,
     loadConversationMessages,
     selectedWorkflow,
     setCurrentConversationId,
@@ -276,8 +311,6 @@ export function Chat() {
   ])
 
   const refreshConfigState = async (showLoading = false) => {
-    let hasValidConfig = false
-
     try {
       if (showLoading) {
         setIsCheckingConfig(true)
@@ -286,45 +319,16 @@ export function Chat() {
       const config = await getConfig('1')
       setConfigSnapshot(config)
 
-      const activeModel = config.aiModels?.find((item) => item.isActive) || config.aiModels?.[0]
-      const primaryReady = isModelReady(config.aiModel)
-      const fallbackReady = isModelReady(activeModel)
-      hasValidConfig = primaryReady || fallbackReady
-
-      setHasAiModelConfig(hasValidConfig)
       setActiveAiModel(
         buildActiveModelInfo({
           aiModel: config.aiModel,
           aiModels: config.aiModels || [],
         })
       )
-      setModelCheckDetails({
-        primaryLabel: config.aiModel.name || config.aiModel.modelName || '主模型未填写名称',
-        primaryReady,
-        fallbackLabel:
-          activeModel?.name ||
-          activeModel?.modelName ||
-          (config.aiModels.length > 0 ? '已存在候选模型但信息不完整' : '未检测到候选模型'),
-        fallbackReady,
-        lastError: '',
-      })
     } catch (_error) {
       setConfigSnapshot(null)
-      setHasAiModelConfig(false)
       setActiveAiModel(null)
-      hasValidConfig = false
-      setModelCheckDetails({
-        primaryLabel: '未能读取主模型配置',
-        primaryReady: false,
-        fallbackLabel: '未能读取候选模型',
-        fallbackReady: false,
-        lastError: '当前无法读取系统配置，请检查后端服务是否已启动。',
-      })
     } finally {
-      if (!hasValidConfig) {
-        setHasAiModelConfig(false)
-      }
-
       if (showLoading) {
         setIsCheckingConfig(false)
       }
@@ -342,8 +346,8 @@ export function Chat() {
           getWorkflows(),
           getWorkflowExecutions('1'),
         ])
-        setWorkflows(workflowResponse.data)
-        setWorkflowExecutions(executionResponse.data)
+        setWorkflows(Array.isArray(workflowResponse.data) ? workflowResponse.data : [])
+        setWorkflowExecutions(Array.isArray(executionResponse.data) ? executionResponse.data : [])
       } catch (error) {
         console.error('获取工作台数据失败:', error)
       }
@@ -357,13 +361,30 @@ export function Chat() {
     return match?.[1] || ''
   }, [inputMessage])
 
+  const visibleWorkflows = useMemo(() => {
+    return getVisibleWorkflows(workflowList as WorkflowDefinition[], {
+      hasAiModel: Boolean(activeAiModel),
+      localWorkflowOnly,
+    })
+  }, [activeAiModel, localWorkflowOnly, workflowList])
+
+  useEffect(() => {
+    if (!selectedWorkflow) {
+      return
+    }
+
+    if (!canUseWorkflow(selectedWorkflow, { hasAiModel: Boolean(activeAiModel), localWorkflowOnly })) {
+      setSelectedWorkflow(null)
+    }
+  }, [activeAiModel, localWorkflowOnly, selectedWorkflow, setSelectedWorkflow])
+
   const filteredWorkflows = useMemo(() => {
     const token = currentCommandToken.replace(/^\/\+?/, '').toLowerCase()
     if (!token) {
-      return workflows.slice(0, 8)
+      return visibleWorkflows.slice(0, 8)
     }
 
-    return workflows.filter((workflow) => {
+    return visibleWorkflows.filter((workflow) => {
       const candidates = [
         workflow.name,
         workflow.displayName,
@@ -372,11 +393,106 @@ export function Chat() {
       ]
       return candidates.some((item) => item.toLowerCase().includes(token))
     })
-  }, [currentCommandToken, workflows])
+  }, [currentCommandToken, visibleWorkflows])
 
-  const hasConversationStarted = conversationMessages.length > 0 || queuedSubmissions.length > 0 || isLoading
+  const hasConversationStarted = messageList.length > 0 || queuedSubmissionList.length > 0 || isLoading
+
+  const submitQueuedSubmission = (submission: QueuedSubmission) => {
+    if (isLoading || queuedSubmissionList.length > 0) {
+      setQueuedSubmissions((current) => [...current, submission])
+      showToast({
+        title: '已加入队列',
+        message: '当前有消息正在处理中，这条消息会按顺序提交给 AI。',
+        variant: 'info',
+      })
+      return
+    }
+
+    setIsLoading(true)
+    void processSubmission(submission, true)
+  }
+
+  const beginTaxReportSelection = async (workflow: WorkflowDefinition): Promise<ImportedFolderSelection | null> => {
+    if (isSelectingTaxFolder) {
+      return null
+    }
+
+    try {
+      setIsSelectingTaxFolder(true)
+      const folderPath =
+        typeof window !== 'undefined' && window.electronAPI?.selectDirectory
+          ? await window.electronAPI.selectDirectory()
+          : null
+
+      if (!folderPath && folderInputRef.current) {
+        setSelectedWorkflow(workflow)
+        setInputMessage(workflow.invocation.primary)
+        setShowWorkflowSuggestions(false)
+        setShowActionMenu(false)
+        folderInputRef.current.click()
+        return null
+      }
+
+      if (!folderPath) {
+        setSelectedWorkflow(null)
+        setTaxFolderSelection(null)
+        setInputMessage('')
+        setShowWorkflowSuggestions(false)
+        pendingTaxSubmissionRef.current = null
+        return null
+      }
+
+      setIsUploadingAsset(true)
+      const imported = await importWorkspaceFolder({
+        userId: '1',
+        folderPath,
+      })
+
+      const selection: ImportedFolderSelection = {
+        folderName: imported.data.folderName,
+        folderPath: imported.data.folderPath,
+        assets: imported.data.assets.map((item) => ({
+          fileName: item.fileName,
+          relativePath: item.relativePath,
+          mimeType: item.mimeType,
+          originalFileName: item.originalFileName,
+        })),
+      }
+
+      setSelectedWorkflow(workflow)
+      setTaxFolderSelection(selection)
+      setInputMessage(workflow.invocation.primary)
+      setShowWorkflowSuggestions(false)
+      setShowActionMenu(false)
+      showToast({
+        title: '文件夹已载入',
+        message: `已导入 ${selection.folderName}，共 ${selection.assets.length} 个 Excel 文件。`,
+        variant: 'success',
+      })
+      return selection
+    } catch (error) {
+      setSelectedWorkflow(null)
+      setTaxFolderSelection(null)
+      setInputMessage('')
+      pendingTaxSubmissionRef.current = null
+      showToast({
+        title: '文件夹导入失败',
+        message: getErrorMessage(error, '请稍后重试'),
+        variant: 'error',
+      })
+      return null
+    } finally {
+      setIsUploadingAsset(false)
+      setIsSelectingTaxFolder(false)
+    }
+  }
 
   const handleSelectWorkflow = (workflow: WorkflowDefinition, insertCommand = false) => {
+    if (workflow.id === 'workflow-tax-report') {
+      void beginTaxReportSelection(workflow)
+      return
+    }
+
     setSelectedWorkflow(workflow)
     setShowWorkflowSuggestions(false)
     if (insertCommand) {
@@ -385,6 +501,17 @@ export function Chat() {
         return `${workflow.invocation.primary}${withoutCommand ? ` ${withoutCommand}` : ' '}`
       })
     }
+  }
+
+  const ensureNewsAssistantWorkflow = async () => {
+    const existingWorkflow = findNewsAssistantWorkflow(workflows)
+    if (existingWorkflow) {
+      return existingWorkflow
+    }
+
+    const response = await getWorkflows()
+    setWorkflows(response.data)
+    return findNewsAssistantWorkflow(response.data)
   }
 
   const processSubmission = async (submission: QueuedSubmission, loadingAlreadyStarted: boolean = false) => {
@@ -401,6 +528,8 @@ export function Chat() {
         id: submission.id,
         role: 'user',
         content: submission.rawMessage,
+        uploadedFolderName: submission.uploadedFolderName,
+        uploadedFileNames: submission.uploadedFileNames,
         referencedNewsId: submission.referencedNews?.id,
         workflowId: activeWorkflow?.id,
         workflowInvocation: activeWorkflow?.invocation.primary,
@@ -432,6 +561,11 @@ export function Chat() {
         navigate(`/chat/${historyId}`, { replace: true })
       }
 
+      const history = currentMessages.slice(-12).map((msg) => ({
+        role: msg.role,
+        content: clampChatText(msg.content, 800),
+      }))
+
       const referencedPrompt = submission.referencedNews
         ? [
             `引用新闻标题：${submission.referencedNews.title}`,
@@ -443,14 +577,29 @@ export function Chat() {
           ].join('\n')
         : ''
 
-      const data = await chatWithAi({
-        userId: '1',
-        message: referencedPrompt ? `${referencedPrompt}\n\n用户任务：${submission.requestMessage}` : submission.requestMessage,
-        history: currentMessages.slice(-12).map((msg) => ({
-          role: msg.role,
-          content: clampChatText(msg.content, 800),
-        })),
-      })
+      const data =
+        submission.requestMode === 'workflow' && submission.workflow
+          ? canUseWorkflow(submission.workflow, {
+              hasAiModel: Boolean(activeAiModel),
+              localWorkflowOnly,
+            })
+            ? await executeWorkflow({
+                workflowId: submission.workflow.id,
+                invocation: submission.workflow.invocation.primary,
+                userId: '1',
+                message: submission.requestMessage,
+                uploadedAssetPaths: submission.uploadedAssetPaths,
+                referencedNewsId: submission.referencedNews?.id,
+                history,
+              })
+            : (() => {
+                throw new Error('当前未配置可用 AI 模型，该工作流暂不可用')
+              })()
+          : await chatWithAi({
+              userId: '1',
+              message: referencedPrompt ? `${referencedPrompt}\n\n用户任务：${submission.requestMessage}` : submission.requestMessage,
+              history,
+            })
 
       if (data.workflow) {
         setSelectedWorkflow(data.workflow)
@@ -473,6 +622,34 @@ export function Chat() {
         timestamp: new Date().toISOString(),
       }
       addConversationMessage(aiMessage)
+
+      if (submission.autoSaveGeneratedNews && data.content.trim()) {
+        try {
+          const savedDraft = await createSavedNews({
+            userId: '1',
+            content: data.content,
+            originalNewsId: submission.referencedNews?.id,
+            originalNewsUrl: submission.referencedNews?.url,
+            industries: submission.referencedNews?.relatedIndustries || [],
+            outputType: 'news',
+          })
+          const latestSavedNews = useAppStore.getState().savedNews
+          const createdDraft = savedDraft.data as SavedNews
+          setSavedNews([createdDraft, ...latestSavedNews])
+          showToast({
+            title: '新闻草稿已生成',
+            message: '新闻助手已完成成稿，并自动保存到任务结果。',
+            variant: 'success',
+          })
+          navigate(`/news?highlight=${encodeURIComponent(createdDraft.id)}`)
+        } catch (error) {
+          showToast({
+            title: '自动保存失败',
+            message: getErrorMessage(error, '新闻内容已生成，但保存到任务结果时失败。'),
+            variant: 'error',
+          })
+        }
+      }
 
       const updatedMessages = [...currentMessages, userMessage, aiMessage]
       const completedAt = new Date().toISOString()
@@ -498,15 +675,15 @@ export function Chat() {
   }
 
   useEffect(() => {
-    if (isLoading || queuedSubmissions.length === 0) {
+    if (isLoading || queuedSubmissionList.length === 0) {
       return
     }
 
-    const [nextSubmission, ...restSubmissions] = queuedSubmissions
+    const [nextSubmission, ...restSubmissions] = queuedSubmissionList
     setIsLoading(true)
     setQueuedSubmissions(restSubmissions)
     void processSubmission(nextSubmission, true)
-  }, [isLoading, queuedSubmissions])
+  }, [isLoading, queuedSubmissionList])
 
   const handleSendMessage = async () => {
     const rawMessage = inputMessage.trim()
@@ -515,6 +692,7 @@ export function Chat() {
     try {
       let activeWorkflow = selectedWorkflow
       let requestMessage = rawMessage
+      let currentTaxSelection = taxFolderSelection
 
       if (rawMessage.startsWith('/')) {
         const parsed = await parseWorkflowCommand(rawMessage)
@@ -526,37 +704,113 @@ export function Chat() {
           })
           return
         }
+        if (!canUseWorkflow(parsed.workflow, { hasAiModel: Boolean(activeAiModel), localWorkflowOnly })) {
+          showToast({
+            title: '工作流不可用',
+            message: '当前仅支持本地工作流，请选择 /个税报表。',
+            variant: 'error',
+          })
+          return
+        }
         activeWorkflow = parsed.workflow
+        requestMessage = parsed.remainingInput || rawMessage
         setSelectedWorkflow(parsed.workflow)
       } else if (activeWorkflow) {
         requestMessage = `${activeWorkflow.invocation.primary} ${rawMessage}`
       }
 
+      if (!activeWorkflow && !canUseAiChat) {
+        const currentMessages = conversationMessagesRef.current
+        const currentHistories = conversationHistoriesRef.current
+        const currentHistoryId = currentConversationIdRef.current
+        const now = new Date().toISOString()
+        const historyId = currentHistoryId || Date.now().toString()
+        const firstMessage = currentMessages.find((msg) => msg.role === 'user') || null
+        const userMessage: ConversationMessage = {
+          id: Date.now().toString(),
+          role: 'user',
+          content: rawMessage,
+          timestamp: now,
+        }
+        const systemMessage: ConversationMessage = {
+          id: `${Date.now() + 1}`,
+          role: 'assistant',
+          content:
+            '当前未配置 AI 模型，无法使用 AI 进行沟通，请前往【设置】中的【系统配置】配置 AI 模型。',
+          messageType: 'system',
+          timestamp: now,
+        }
+        const updatedMessages = [...currentMessages, userMessage, systemMessage]
+        const existingHistory = currentHistoryId
+          ? currentHistories.find((item) => item.id === currentHistoryId)
+          : null
+
+        addConversationMessage(userMessage)
+        addConversationMessage(systemMessage)
+        upsertConversationHistory({
+          id: historyId,
+          title: firstMessage?.content.substring(0, 50) || rawMessage.substring(0, 50) || '未命名任务',
+          messages: updatedMessages,
+          createdAt: existingHistory?.createdAt || now,
+          updatedAt: now,
+        })
+
+        if (conversationIdRef.current !== historyId) {
+          navigate(`/chat/${historyId}`, { replace: true })
+        }
+
+        setInputMessage('')
+        setShowWorkflowSuggestions(false)
+        setTaxFolderSelection(null)
+        pendingTaxSubmissionRef.current = null
+        return
+      }
+
+      if (activeWorkflow?.id === 'workflow-tax-report' && !taxFolderSelection) {
+        pendingTaxSubmissionRef.current = {
+          rawMessage,
+          requestMessage,
+          workflow: activeWorkflow,
+          createdAt: new Date().toISOString(),
+        }
+        const selection = await beginTaxReportSelection(activeWorkflow)
+        if (!selection) {
+          return
+        }
+        currentTaxSelection = selection
+      }
+
+      const taxSelection = activeWorkflow?.id === 'workflow-tax-report' ? currentTaxSelection || undefined : undefined
       const submission: QueuedSubmission = {
         id: Date.now().toString(),
         rawMessage,
         requestMessage,
         workflow: activeWorkflow,
+        uploadedAssetPaths:
+          activeWorkflow?.id === 'workflow-tax-report'
+            ? taxSelection?.assets.map((item) => item.relativePath)
+            : assetList.map((item) => item.relativePath),
+        uploadedFolderName: activeWorkflow?.id === 'workflow-tax-report' ? taxSelection?.folderName : undefined,
+        uploadedFileNames:
+          activeWorkflow?.id === 'workflow-tax-report'
+            ? taxSelection?.assets.map((item) => item.originalFileName || item.fileName)
+            : undefined,
         referencedNews: quotedNews,
+        requestMode: activeWorkflow ? 'workflow' : 'chat',
         createdAt: new Date().toISOString(),
       }
 
       setInputMessage('')
       setShowWorkflowSuggestions(false)
-
-      if (isLoading || queuedSubmissions.length > 0) {
-        setQueuedSubmissions((current) => [...current, submission])
-        showToast({
-          title: '已加入队列',
-          message: '当前有消息正在处理中，这条消息会按顺序提交给 AI。',
-          variant: 'info',
-        })
-        return
+      setTaxFolderSelection(null)
+      pendingTaxSubmissionRef.current = null
+      if (activeWorkflow?.id !== 'workflow-tax-report') {
+        setUploadedAssets([])
       }
 
-      setIsLoading(true)
-      void processSubmission(submission, true)
+      submitQueuedSubmission(submission)
     } catch (error) {
+      pendingTaxSubmissionRef.current = null
       showToast({
         title: '提交失败',
         message: getErrorMessage(error, '请稍后重试'),
@@ -609,7 +863,52 @@ export function Chat() {
     }
   }
 
+  const parseFolderAction = (rawAction: string): { type: 'open-output-folder'; targetPath: string } | null => {
+    const match = rawAction.match(/^(open-output-folder):(.+)$/)
+    if (!match) {
+      return null
+    }
+
+    try {
+      const [, type, payload] = match
+      return {
+        type: type as 'open-output-folder',
+        targetPath: decodeBase64Url(payload),
+      }
+    } catch (error) {
+      console.error('解析文件夹操作失败:', error)
+      return null
+    }
+  }
+
   const handleMarkdownAction = async (rawAction: string) => {
+    const folderAction = parseFolderAction(rawAction)
+    if (folderAction) {
+      try {
+        const relativePath = currentWorkspacePath && folderAction.targetPath.startsWith(currentWorkspacePath)
+          ? toWorkspaceRelativePath(currentWorkspacePath, folderAction.targetPath)
+          : 'uploads/generated'
+
+        const openedByElectron = window.electronAPI?.openPath
+          ? await window.electronAPI.openPath(folderAction.targetPath)
+          : false
+
+        if (!openedByElectron) {
+          await openWorkspaceFolder({
+            userId: '1',
+            relativePath,
+          })
+        }
+      } catch (error) {
+        showToast({
+          title: '打开失败',
+          message: getErrorMessage(error, '无法打开 output 文件夹。'),
+          variant: 'error',
+        })
+      }
+      return
+    }
+
     const parsed = parseNewsAction(rawAction)
     if (!parsed) {
       showToast({
@@ -624,13 +923,49 @@ export function Chat() {
     registerReferencedNews(article)
 
     if (type === 'quote-news') {
-      setQuotedNews(article)
-      setInputMessage((current) => current || '请基于这条新闻生成摘要 / 成稿 / 改写版本')
-      showToast({
-        title: '已引用新闻',
-        message: '这条新闻会作为当前对话上下文继续使用。',
-        variant: 'success',
-      })
+      try {
+        const workflow = await ensureNewsAssistantWorkflow()
+        if (!workflow) {
+          throw new Error('未找到新闻助手工作流')
+        }
+
+        setSelectedWorkflow(workflow)
+
+        const submission: QueuedSubmission = {
+          id: Date.now().toString(),
+          rawMessage: `引用推荐新闻并生成新稿：${article.title}`,
+          requestMessage: buildNewsAssistantDraftTask(article),
+          workflow,
+          referencedNews: article,
+          requestMode: 'workflow',
+          autoSaveGeneratedNews: true,
+          createdAt: new Date().toISOString(),
+        }
+
+        if (isLoading || queuedSubmissionList.length > 0) {
+          setQueuedSubmissions((current) => [...current, submission])
+          showToast({
+            title: '已加入队列',
+            message: '将按顺序启动新闻助手生成并自动保存新稿。',
+            variant: 'info',
+          })
+          return
+        }
+
+        setIsLoading(true)
+        showToast({
+          title: '新闻助手已启动',
+          message: '正在基于引用新闻撰写新稿，完成后会自动保存到任务结果。',
+          variant: 'success',
+        })
+        void processSubmission(submission, true)
+      } catch (error) {
+        showToast({
+          title: '启动失败',
+          message: getErrorMessage(error, '暂时无法启动新闻助手。'),
+          variant: 'error',
+        })
+      }
       return
     }
 
@@ -750,30 +1085,36 @@ export function Chat() {
       reader.readAsDataURL(file)
     })
 
-  const handleUploadAsset = async (file: File | null) => {
-    if (!file) {
+  const uploadWorkspaceFiles = async (files: File[]) => {
+    if (files.length === 0) {
       return
     }
 
     try {
       setIsUploadingAsset(true)
-      const contentBase64 = await readFileAsBase64(file)
-      const result = await uploadWorkspaceAsset({
-        userId: '1',
-        fileName: file.name,
-        contentBase64,
-        mimeType: file.type || 'application/octet-stream',
-      })
+      const uploadedResults: UploadedAsset[] = []
 
-      setUploadedAssets((current) => [
-        result.data,
-        ...current.filter((item) => item.relativePath !== result.data.relativePath),
-      ].slice(0, 4))
-      setInputMessage((current) => current || `已上传文件：${result.data.fileName}，请基于该文件继续处理。`)
+      for (const file of files) {
+        const contentBase64 = await readFileAsBase64(file)
+        const result = await uploadWorkspaceAsset({
+          userId: '1',
+          fileName: file.name,
+          contentBase64,
+          mimeType: file.type || 'application/octet-stream',
+        })
+        uploadedResults.push(result.data)
+      }
+
+      setUploadedAssets((current) => {
+        const merged = [...uploadedResults, ...current]
+        const deduped = new Map(merged.map((item) => [item.relativePath, item]))
+        return Array.from(deduped.values())
+      })
+      setInputMessage((current) => current || `已上传文件：${uploadedResults[0]?.fileName || ''}，请基于该文件继续处理。`)
       setShowActionMenu(false)
       showToast({
         title: '上传成功',
-        message: `${result.data.fileName} 已写入工程文件夹 uploads 目录。`,
+        message: files.length > 1 ? `${files.length} 个文件已写入工程文件夹 uploads 目录。` : `${uploadedResults[0]?.fileName || '文件'} 已写入工程文件夹 uploads 目录。`,
         variant: 'success',
       })
     } catch (error) {
@@ -793,6 +1134,116 @@ export function Chat() {
     }
   }
 
+  const handleUploadAsset = async (file: File | null) => {
+    if (!file) {
+      return
+    }
+
+    await uploadWorkspaceFiles([file])
+  }
+
+  const handleUploadFolderFallback = async (fileList: FileList | null) => {
+    if (!fileList) {
+      setSelectedWorkflow(null)
+      setTaxFolderSelection(null)
+      setInputMessage('')
+      pendingTaxSubmissionRef.current = null
+      return
+    }
+
+    const excelFiles = Array.from(fileList).filter((file) => /\.(xlsx|xls)$/i.test(file.name))
+    const filteredExcelFiles = excelFiles.filter((file) => {
+      const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name
+      return !/(^|\/)(output|generated)(\/|$)/i.test(relativePath.replace(/\\/g, '/'))
+    })
+
+    if (filteredExcelFiles.length === 0) {
+      setSelectedWorkflow(null)
+      setTaxFolderSelection(null)
+      setInputMessage('')
+      showToast({
+        title: '未找到 Excel 文件',
+        message: '所选文件夹中没有可用的 Excel 文件。',
+        variant: 'error',
+      })
+      if (folderInputRef.current) {
+        folderInputRef.current.value = ''
+      }
+      return
+    }
+
+    try {
+      setIsUploadingAsset(true)
+      const uploadedResults: UploadedAsset[] = []
+
+      for (const file of filteredExcelFiles) {
+        const contentBase64 = await readFileAsBase64(file)
+        const result = await uploadWorkspaceAsset({
+          userId: '1',
+          fileName: file.name,
+          contentBase64,
+          mimeType: file.type || 'application/octet-stream',
+        })
+        uploadedResults.push({
+          ...result.data,
+          originalFileName: file.name,
+        })
+      }
+
+      const folderName =
+        ((filteredExcelFiles[0] as File & { webkitRelativePath?: string }).webkitRelativePath || '')
+          .split('/')
+          .filter(Boolean)[0] || '已选文件夹'
+
+      setTaxFolderSelection({
+        folderName,
+        folderPath: folderName,
+        assets: uploadedResults,
+      })
+      setInputMessage('/个税报表')
+      setShowWorkflowSuggestions(false)
+      setShowActionMenu(false)
+      showToast({
+        title: '文件夹已载入',
+        message: `已导入 ${folderName}，共 ${uploadedResults.length} 个 Excel 文件。`,
+        variant: 'success',
+      })
+
+      const pendingSubmission = pendingTaxSubmissionRef.current
+      if (pendingSubmission) {
+        pendingTaxSubmissionRef.current = null
+        setTaxFolderSelection(null)
+        setInputMessage('')
+
+        submitQueuedSubmission({
+          id: Date.now().toString(),
+          rawMessage: pendingSubmission.rawMessage,
+          requestMessage: pendingSubmission.requestMessage,
+          workflow: pendingSubmission.workflow,
+          uploadedAssetPaths: uploadedResults.map((item) => item.relativePath),
+          uploadedFolderName: folderName,
+          uploadedFileNames: uploadedResults.map((item) => item.originalFileName || item.fileName),
+          requestMode: 'workflow',
+          createdAt: pendingSubmission.createdAt,
+        })
+      }
+    } catch (error) {
+      setSelectedWorkflow(null)
+      setTaxFolderSelection(null)
+      setInputMessage('')
+      pendingTaxSubmissionRef.current = null
+      showToast({
+        title: '文件夹导入失败',
+        message: getErrorMessage(error, '请稍后重试'),
+        variant: 'error',
+      })
+    } finally {
+      setIsUploadingAsset(false)
+      if (folderInputRef.current) {
+        folderInputRef.current.value = ''
+      }
+    }
+  }
   const handleOpenSaveDialog = (content: string) => {
     setPendingSaveContent(content)
     setSaveTargetType('news')
@@ -848,59 +1299,6 @@ export function Chat() {
     )
   }
 
-  if (!hasAiModelConfig) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center px-6 py-12">
-        <div className="surface-panel w-full max-w-xl p-8 text-center">
-          <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-[24px] bg-blue-50 shadow-[0_16px_36px_rgba(37,99,235,0.08)]">
-            <Server className="h-10 w-10 text-blue-600" />
-          </div>
-          <h2 className="text-3xl font-semibold text-slate-900">先配置 AI 模型</h2>
-          <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-editorial-muted">
-            完成后即可开始对话。
-          </p>
-          <div className="mx-auto mt-8 grid w-full max-w-xl gap-4 text-left md:grid-cols-2">
-            <div className={`rounded-2xl border px-4 py-4 ${modelCheckDetails.primaryReady ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-slate-50'}`}>
-              <p className="text-xs uppercase tracking-[0.18em] text-editorial-muted">主模型检测</p>
-              <p className="mt-2 font-medium text-slate-900">{modelCheckDetails.primaryLabel}</p>
-              <p className={`mt-2 text-sm ${modelCheckDetails.primaryReady ? 'text-emerald-700' : 'text-slate-600'}`}>
-                {modelCheckDetails.primaryReady ? '已满足聊天调用条件' : '当前主模型信息还不完整'}
-              </p>
-            </div>
-            <div className={`rounded-2xl border px-4 py-4 ${modelCheckDetails.fallbackReady ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-slate-50'}`}>
-              <p className="text-xs uppercase tracking-[0.18em] text-editorial-muted">候选模型检测</p>
-              <p className="mt-2 font-medium text-slate-900">{modelCheckDetails.fallbackLabel}</p>
-              <p className={`mt-2 text-sm ${modelCheckDetails.fallbackReady ? 'text-emerald-700' : 'text-slate-600'}`}>
-                {modelCheckDetails.fallbackReady ? '可作为当前可用模型回退' : '还没有检测到可用候选模型'}
-              </p>
-            </div>
-          </div>
-          {modelCheckDetails.lastError && (
-            <div className="mx-auto mt-5 w-full max-w-xl rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-left">
-              <p className="text-sm font-medium text-amber-900">检测提示</p>
-              <p className="mt-1 text-sm leading-6 text-amber-800">{modelCheckDetails.lastError}</p>
-            </div>
-          )}
-          <div className="mx-auto mt-8 w-full max-w-md space-y-4">
-            <Link
-              to="/config"
-              className="focus-ring flex items-center justify-center gap-3 rounded-2xl bg-gradient-to-r from-editorial-violet to-editorial-cyan px-6 py-3.5 text-white transition-transform duration-200 hover:-translate-y-0.5"
-            >
-              <Settings className="h-5 w-5" />
-              前往配置页面
-            </Link>
-            <button
-              onClick={() => window.location.reload()}
-              className="focus-ring flex w-full items-center justify-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-6 py-3.5 text-slate-700 transition-colors hover:bg-slate-100"
-            >
-              重新检测模型状态
-            </button>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div className="flex h-full flex-col bg-transparent">
       <section className="flex min-h-0 flex-1 flex-col bg-transparent">
@@ -916,7 +1314,7 @@ export function Chat() {
                   输入问题，或直接调用工作流。
                 </p>
                 <div className="mt-8 flex flex-wrap justify-center gap-3">
-                  {workflows.slice(0, 6).map((workflow) => (
+                  {visibleWorkflows.slice(0, 6).map((workflow) => (
                     <button
                       key={workflow.id}
                       onClick={() => handleSelectWorkflow(workflow, true)}
@@ -931,7 +1329,7 @@ export function Chat() {
             </div>
           ) : (
             <div className="chat-thread-shell w-full space-y-6" style={{ contentVisibility: 'auto' }}>
-              {conversationMessages.map((message) => (
+              {messageList.map((message) => (
                 <ConversationItem
                   key={message.id}
                   message={message}
@@ -942,13 +1340,15 @@ export function Chat() {
                   isSaving={isSavingToDraft}
                 />
               ))}
-              {queuedSubmissions.map((submission) => (
+              {queuedSubmissionList.map((submission) => (
                 <ConversationItem
                   key={submission.id}
                   message={{
                     id: submission.id,
                     role: 'user',
                     content: submission.rawMessage,
+                    uploadedFolderName: submission.uploadedFolderName,
+                    uploadedFileNames: submission.uploadedFileNames,
                     referencedNewsId: submission.referencedNews?.id,
                     workflowId: submission.workflow?.id,
                     workflowInvocation: submission.workflow?.invocation.primary,
@@ -984,8 +1384,8 @@ export function Chat() {
                         <div className="ai-thinking-progress-bar h-full w-1/3 rounded-full bg-gradient-to-r from-editorial-violet via-blue-500 to-editorial-cyan" />
                       </div>
                       <p className="mt-3 text-sm text-editorial-muted">
-                        {queuedSubmissions.length > 0
-                          ? `当前排队 ${queuedSubmissions.length} 条，AI 会按顺序处理`
+                        {queuedSubmissionList.length > 0
+                          ? `当前排队 ${queuedSubmissionList.length} 条，AI 会按顺序处理`
                           : selectedWorkflow
                             ? `当前工作流：${selectedWorkflow.displayName}`
                             : '普通对话模式'}
@@ -1002,11 +1402,17 @@ export function Chat() {
         <div className="border-t border-slate-200 bg-white px-6 py-5">
           <div className="chat-thread-shell">
             <div className="relative rounded-[28px] border border-slate-200 bg-white px-4 pb-3 pt-3 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
-              {(selectedWorkflow || quotedNews || uploadedAssets.length > 0) && (
+              {(selectedWorkflow || quotedNews || (assetList.length > 0 && !isTaxReportWorkflow) || taxFolderSelection) && (
                 <div className="mb-3 flex flex-wrap items-center gap-2">
                   {selectedWorkflow && (
                     <button
-                      onClick={() => setSelectedWorkflow(null)}
+                      onClick={() => {
+                        setSelectedWorkflow(null)
+                        setTaxFolderSelection(null)
+                        if (isTaxReportWorkflow) {
+                          setInputMessage('')
+                        }
+                      }}
                       className="focus-ring rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-700"
                     >
                       {selectedWorkflow.displayName}
@@ -1020,7 +1426,7 @@ export function Chat() {
                       引用：{quotedNews.title}
                     </button>
                   )}
-                  {uploadedAssets.map((asset) => (
+                  {!isTaxReportWorkflow && assetList.map((asset) => (
                     <div
                       key={asset.relativePath}
                       className="max-w-[260px] truncate rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-700"
@@ -1028,6 +1434,25 @@ export function Chat() {
                       {asset.fileName}
                     </div>
                   ))}
+                  {isTaxReportWorkflow && taxFolderSelection && (
+                    <div className="rounded-full bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-700">
+                      已选择文件夹：{taxFolderSelection.folderName}，共 {taxFolderSelection.assets.length} 个 Excel 文件
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {!canUseAiChat && !selectedWorkflow && (
+                <div className="mb-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800">
+                  当前未配置 AI 模型，无法使用 AI 进行沟通，请前往
+                  <button
+                    type="button"
+                    onClick={() => navigate('/config')}
+                    className="mx-1 font-medium text-amber-900 underline underline-offset-4 transition hover:text-amber-950"
+                  >
+                    设置 / 系统配置
+                  </button>
+                  完成 AI 模型配置，或直接使用 /个税报表 等本地工作流。
                 </div>
               )}
 
@@ -1055,7 +1480,9 @@ export function Chat() {
                   }}
                   rows={2}
                   placeholder={
-                    selectedWorkflow
+                    isTaxReportWorkflow
+                      ? '已选择文件夹，点击发送后将直接生成个税申报表...'
+                      : selectedWorkflow
                       ? `继续在 ${selectedWorkflow.displayName} 下输入任务...`
                       : '输入内容，或用 /工作流名称 调用工作流...'
                   }
@@ -1100,7 +1527,7 @@ export function Chat() {
                     {showActionMenu && (
                       <div className="absolute bottom-[calc(100%+12px)] left-0 z-20 w-72 rounded-[26px] border border-slate-200 bg-white p-3 shadow-[0_18px_40px_rgba(15,23,42,0.12)]">
                         <div className="space-y-1">
-                          {workflows.slice(0, 4).map((workflow) => (
+                          {visibleWorkflows.slice(0, 4).map((workflow) => (
                             <button
                               key={workflow.id}
                               type="button"
@@ -1118,6 +1545,19 @@ export function Chat() {
                             </button>
                           ))}
                           <div className="my-2 border-t border-slate-100" />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const taxWorkflow = visibleWorkflows.find((item) => item.id === 'workflow-tax-report')
+                              if (taxWorkflow) {
+                                void beginTaxReportSelection(taxWorkflow)
+                              }
+                            }}
+                            className="focus-ring flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left transition-colors hover:bg-slate-50"
+                          >
+                            <FolderOpen className="h-4 w-4 text-slate-500" />
+                            <span className="text-sm font-medium text-slate-900">上传文件夹</span>
+                          </button>
                           <button
                             type="button"
                             onClick={() => fileInputRef.current?.click()}
@@ -1163,10 +1603,10 @@ export function Chat() {
                       <span className="max-w-[160px] truncate">{isSwitchingModel ? '切换模型中...' : currentModelLabel}</span>
                       <ChevronDown className="h-3.5 w-3.5" />
                     </button>
-                    {showModelMenu && configuredAiModels.length > 0 && (
+                    {showModelMenu && configuredModelList.length > 0 && (
                       <div className="absolute bottom-[calc(100%+12px)] right-0 z-20 w-72 rounded-[26px] border border-slate-200 bg-white p-3 shadow-[0_18px_40px_rgba(15,23,42,0.12)]">
                         <div className="space-y-1">
-                          {configuredAiModels.map((model) => {
+                          {configuredModelList.map((model) => {
                             const isCurrent = model.isActive
                             return (
                               <button
@@ -1197,7 +1637,7 @@ export function Chat() {
                     className="focus-ring flex h-10 w-10 items-center justify-center rounded-full bg-slate-700 text-white transition-colors hover:bg-slate-900 disabled:cursor-not-allowed disabled:bg-slate-300"
                     aria-label="发送消息"
                   >
-                    <Send className={`h-4.5 w-4.5 ${(isLoading || queuedSubmissions.length > 0) ? 'animate-pulse' : ''}`} />
+                    <Send className={`h-4.5 w-4.5 ${(isLoading || queuedSubmissionList.length > 0) ? 'animate-pulse' : ''}`} />
                   </button>
                 </div>
               </div>
@@ -1214,6 +1654,14 @@ export function Chat() {
               accept="image/*"
               className="hidden"
               onChange={(event) => void handleUploadAsset(event.target.files?.[0] || null)}
+            />
+            <input
+              ref={folderInputRef}
+              type="file"
+              multiple
+              {...folderInputAttributes}
+              className="hidden"
+              onChange={(event) => void handleUploadFolderFallback(event.target.files)}
             />
             {isUploadingAsset && (
               <p className="mt-3 text-sm text-editorial-muted">正在上传文件到工程目录...</p>

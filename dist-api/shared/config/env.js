@@ -7,7 +7,7 @@ exports.envSchema = zod_1.z.object({
     // 应用配置
     NODE_ENV: zod_1.z.enum(['development', 'production', 'test']).default('development'),
     PORT: zod_1.z.preprocess(Number, zod_1.z.number()).default(3001),
-    HOST: zod_1.z.string().default('localhost'),
+    HOST: zod_1.z.string().default('0.0.0.0'),
     // 数据库配置
     DATABASE_URL: zod_1.z.string().default('postgresql://localhost:5432/ainews'),
     DB_MAX_CONNECTIONS: zod_1.z.preprocess(Number, zod_1.z.number()).default(10),

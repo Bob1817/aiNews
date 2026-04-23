@@ -1,4 +1,4 @@
-import type { WorkflowCommandParseResult, WorkflowDefinition, WorkflowExecution } from '@/types'
+import type { WorkflowArtifact, WorkflowCommandParseResult, WorkflowDefinition, WorkflowExecution } from '@/types'
 import { apiRequest, withJsonBody } from '@/lib/api'
 
 export function getWorkflows() {
@@ -33,6 +33,7 @@ export function executeWorkflow(payload: {
   invocation?: string
   userId: string
   message: string
+  uploadedAssetPaths?: string[]
   referencedNewsId?: string
   history?: Array<{ role: 'user' | 'assistant'; content: string }>
 }) {
@@ -41,5 +42,6 @@ export function executeWorkflow(payload: {
     content: string
     workflow: WorkflowDefinition
     execution: WorkflowExecution
+    artifacts?: WorkflowArtifact[]
   }>(`/api/workflows/${workflowId}/execute`, withJsonBody(body, { method: 'POST' }))
 }

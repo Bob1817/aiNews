@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import { User, Bot, Quote, Save, Copy, Repeat, MoreHorizontal, Clock3, X } from 'lucide-react'
 import type { ConversationMessage, NewsArticle } from '@/types'
 import { useToast } from '@/lib/toast'
+import { parseWorkflowResultPresentation } from '@/lib/utils/workflowResultPresentation'
 import { MarkdownRenderer } from './MarkdownRenderer'
+import { WorkflowResultCard } from './workflow-results/WorkflowResultCard'
 
 interface ConversationItemProps {
   message: ConversationMessage
@@ -82,6 +84,7 @@ export function ConversationItem({
     hour: '2-digit',
     minute: '2-digit',
   })
+  const workflowPresentation = !isUser ? parseWorkflowResultPresentation(message) : null
 
   const actionButtonClassName = isUser
     ? 'focus-ring group relative rounded-xl border border-slate-200 bg-white p-2 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-900'
@@ -180,6 +183,25 @@ export function ConversationItem({
                 </div>
               </div>
             )}
+            {message.uploadedFileNames && message.uploadedFileNames.length > 0 && (
+              <div className="mb-3 flex justify-end">
+                <div className="max-w-[85%] rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                  <p className="mb-2 text-xs font-medium uppercase tracking-[0.18em] text-slate-400">
+                    {message.uploadedFolderName ? `文件夹：${message.uploadedFolderName}` : '本次文件'}
+                  </p>
+                  <div className="flex flex-wrap justify-end gap-2">
+                    {message.uploadedFileNames.map((fileName) => (
+                      <span
+                        key={`${message.id}-${fileName}`}
+                        className="max-w-[220px] truncate rounded-full bg-white px-3 py-1.5 text-xs font-medium text-slate-700"
+                      >
+                        {fileName}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
             <div className="flex items-end justify-end gap-3">
               {actionColumn}
               <div className={`rounded-[22px] rounded-tr-md border px-4 py-3.5 shadow-[0_12px_26px_rgba(37,99,235,0.14)] ${
@@ -225,13 +247,22 @@ export function ConversationItem({
               </div>
             )}
             <div className="flex items-end gap-3">
-              <div className="rounded-[22px] rounded-tl-md border border-slate-200 bg-white px-4 py-3.5 text-slate-900 shadow-[0_8px_22px_rgba(15,23,42,0.05)]">
-                <MarkdownRenderer
-                  content={message.content}
-                  className="text-[15px] leading-7 text-slate-800"
-                  onCommandClick={onForwardToInput}
-                  onActionClick={onMarkdownAction}
-                />
+              <div className="w-full min-w-0">
+                {workflowPresentation ? (
+                  <WorkflowResultCard
+                    presentation={workflowPresentation}
+                    onActionClick={onMarkdownAction}
+                  />
+                ) : (
+                  <div className="rounded-[22px] rounded-tl-md border border-slate-200 bg-white px-4 py-3.5 text-slate-900 shadow-[0_8px_22px_rgba(15,23,42,0.05)]">
+                    <MarkdownRenderer
+                      content={message.content}
+                      className="text-[15px] leading-7 text-slate-800"
+                      onCommandClick={onForwardToInput}
+                      onActionClick={onMarkdownAction}
+                    />
+                  </div>
+                )}
               </div>
               {actionColumn}
             </div>

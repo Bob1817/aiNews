@@ -15,6 +15,7 @@ class ConfigService {
         return {
             rootPath: workspace?.rootPath?.trim() || this.getDefaultWorkspaceRoot(),
             allowAiAccess: workspace?.allowAiAccess ?? true,
+            localWorkflowOnly: workspace?.localWorkflowOnly ?? false,
         };
     }
     async ensureWorkspaceStructure(rootPath) {
@@ -153,6 +154,9 @@ class ConfigService {
         }
         if (!config.workspace) {
             config.workspace = this.normalizeWorkspace();
+        }
+        else {
+            config.workspace = this.normalizeWorkspace(config.workspace);
         }
         config.updatedAt = new Date().toISOString();
         return config;

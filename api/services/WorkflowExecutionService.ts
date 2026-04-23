@@ -1,3 +1,4 @@
+import path from 'node:path'
 import type {
   NewsArticle,
   WorkflowArtifact,
@@ -7,7 +8,10 @@ import type {
 } from '../../shared/types'
 import { AICrawlerService } from './AICrawlerService'
 import { AIService } from './AIService'
+import { ConfigService } from './ConfigService'
 import { NewsService } from './NewsService'
+import { SavedNewsService } from './SavedNewsService'
+import { TaxReportWorkflowService } from './TaxReportWorkflowService'
 import { UserService } from './UserService'
 import { WorkflowCommandService } from './WorkflowCommandService'
 import { WorkflowService } from './WorkflowService'
@@ -17,6 +21,7 @@ interface ExecuteWorkflowInput {
   workflowId?: string
   invocation?: string
   message: string
+  uploadedAssetPaths?: string[]
   referencedNewsId?: string
   history?: Array<{ role: 'user' | 'assistant'; content: string }>
 }
@@ -51,12 +56,47 @@ export class WorkflowExecutionService {
     '应用',
   ])
 
+  private hasConfiguredAIModel(aiModel: {
+    provider?: string
+    apiKey?: string
+    modelName?: string
+    baseUrl?: string
+  } | undefined): boolean {
+    if (!aiModel?.provider) {
+      return false
+    }
+
+    switch (aiModel.provider) {
+      case 'ollama':
+      case 'llamacpp':
+        return Boolean(aiModel.modelName || aiModel.baseUrl)
+      case 'openai':
+      case 'anthropic':
+      case 'google':
+        return Boolean(aiModel.apiKey && aiModel.modelName)
+      default:
+        return false
+    }
+  }
+
+  private hasUsableAiModel(config: Awaited<ReturnType<ConfigService['getConfig']>>) {
+    if (this.hasConfiguredAIModel(config.aiModel)) {
+      return true
+    }
+
+    const fallbackModel = config.aiModels?.find((item) => item.isActive) || config.aiModels?.[0]
+    return this.hasConfiguredAIModel(fallbackModel)
+  }
+
   private workflowService: WorkflowService
   private workflowCommandService: WorkflowCommandService
   private aiService: AIService
   private aiCrawlerService: AICrawlerService
   private newsService: NewsService
+  private savedNewsService: SavedNewsService
   private userService: UserService
+  private configService: ConfigService
+  private taxReportWorkflowService: TaxReportWorkflowService
 
   constructor() {
     this.workflowService = new WorkflowService()
@@ -64,7 +104,10 @@ export class WorkflowExecutionService {
     this.aiService = new AIService()
     this.aiCrawlerService = new AICrawlerService()
     this.newsService = new NewsService()
+    this.savedNewsService = new SavedNewsService()
     this.userService = new UserService()
+    this.configService = new ConfigService()
+    this.taxReportWorkflowService = new TaxReportWorkflowService()
   }
 
   async listExecutions(userId: string) {
@@ -90,6 +133,7 @@ export class WorkflowExecutionService {
       userId: input.userId,
       parsed,
       message: input.message,
+      uploadedAssetPaths: input.uploadedAssetPaths,
       referencedNewsId: input.referencedNewsId,
       history: input.history,
     })
@@ -99,12 +143,18 @@ export class WorkflowExecutionService {
     userId: string
     parsed: WorkflowCommandParseResult
     message: string
+    uploadedAssetPaths?: string[]
     referencedNewsId?: string
     history?: Array<{ role: 'user' | 'assistant'; content: string }>
   }) {
     const workflow = input.parsed.workflow
     if (!workflow) {
       throw new Error('工作流不存在')
+    }
+
+    const config = await this.configService.getConfig(input.userId)
+    if (workflow.executionMode === 'ai' && (config.workspace.localWorkflowOnly || !this.hasUsableAiModel(config))) {
+      throw new Error('当前未配置可用 AI 模型，该工作流暂不可用')
     }
 
     const execution: WorkflowExecution = {
@@ -123,25 +173,15 @@ export class WorkflowExecutionService {
     WorkflowExecutionService.executions.unshift(execution)
 
     try {
-      const content =
-        workflow.id === 'workflow-news-digest'
-          ? await this.buildNewsDigest(input.userId, input.parsed.remainingInput || input.message)
-          : await this.generateWorkflowContent(
-              workflow,
-              input.userId,
-              input.parsed.remainingInput || input.message,
-              input.referencedNewsId,
-              input.history
-            )
-
-      const artifacts: WorkflowArtifact[] = [
-        {
-          id: `artifact-${Date.now()}`,
-          type: workflow.id === 'workflow-news-assistant' ? 'news-draft' : 'markdown',
-          title: `${workflow.displayName} 输出`,
-          content,
-        },
-      ]
+      const { content, artifacts } = await this.buildWorkflowResult({
+        executionId: execution.id,
+        workflow,
+        userId: input.userId,
+        message: input.parsed.remainingInput || input.message,
+        uploadedAssetPaths: input.uploadedAssetPaths,
+        referencedNewsId: input.referencedNewsId,
+        history: input.history,
+      })
 
       execution.output = content
       execution.status = 'completed'
@@ -176,6 +216,122 @@ export class WorkflowExecutionService {
     return this.aiService.generateText(userId, `${historySection}${prompt}`, systemPrompt)
   }
 
+  private async buildWorkflowResult(input: {
+    executionId: string
+    workflow: WorkflowDefinition
+    userId: string
+    message: string
+    uploadedAssetPaths?: string[]
+    referencedNewsId?: string
+    history?: Array<{ role: 'user' | 'assistant'; content: string }>
+  }) {
+    const { workflow } = input
+
+    if (workflow.id === 'workflow-tax-report') {
+      return this.buildTaxReportResult(input)
+    }
+
+    const content =
+      workflow.id === 'workflow-news-digest'
+        ? await this.buildNewsDigest(input.userId, input.message)
+        : await this.generateWorkflowContent(
+            workflow,
+            input.userId,
+            input.message,
+            input.referencedNewsId,
+            input.history
+          )
+
+    const artifacts: WorkflowArtifact[] = [
+      {
+        id: `artifact-${Date.now()}`,
+        type: workflow.id === 'workflow-news-assistant' ? 'news-draft' : 'markdown',
+        title: `${workflow.displayName} 输出`,
+        content,
+      },
+    ]
+
+    return { content, artifacts }
+  }
+
+  private buildTaxReportSavedTitle() {
+    const timestamp = new Date()
+      .toLocaleString('zh-CN', { hour12: false })
+      .replace(/\//g, '-')
+
+    return `个税申报表 ${timestamp}`
+  }
+
+  private async buildTaxReportResult(input: {
+    executionId: string
+    workflow: WorkflowDefinition
+    userId: string
+    message: string
+    uploadedAssetPaths?: string[]
+  }) {
+    const uploadedAssetPaths = (input.uploadedAssetPaths || []).filter((item) => item.endsWith('.xlsx') || item.endsWith('.xls'))
+
+    if (uploadedAssetPaths.length === 0) {
+      throw new Error('请先上传包含发放记录表和结算发放表的文件夹')
+    }
+
+    const config = await this.configService.getConfig(input.userId)
+    const result = await this.taxReportWorkflowService.generateReport({
+      workspaceRootPath: config.workspace.rootPath,
+      uploadedRelativePaths: uploadedAssetPaths,
+    })
+
+    const artifactId = `artifact-${Date.now()}`
+    const outputFolderPath = path.join(config.workspace.rootPath, 'uploads', 'generated')
+    const encodedOutputFolderPath = Buffer.from(outputFolderPath, 'utf8').toString('base64url')
+    const downloadUrl = `/api/workflows/executions/${encodeURIComponent(input.executionId)}/artifacts/${encodeURIComponent(artifactId)}/download?userId=${encodeURIComponent(input.userId)}`
+    const content = [
+      '# 合并数据成功',
+      '',
+      `- 识别发放记录表：${result.summary.totalPayoutFiles} 个`,
+      `- 识别结算发放表：${result.summary.totalSettlementFiles} 个`,
+      `- 合并人员数量：${result.summary.totalEmployees} 人`,
+      ...(result.summary.warnings.length > 0 ? ['', '告警：', ...result.summary.warnings.map((item) => `- ${item}`)] : []),
+      '',
+      `[下载合并结果](${downloadUrl})`,
+      `[查看 output 文件夹](action:open-output-folder:${encodedOutputFolderPath})`,
+    ].join('\n')
+
+    const artifacts: WorkflowArtifact[] = [
+      {
+        id: artifactId,
+        type: 'file',
+        title: result.outputFileName,
+        content,
+        fileName: result.outputFileName,
+        filePath: result.outputFilePath,
+        downloadUrl,
+        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        metadata: {
+          ...result.summary,
+          outputFolderPath,
+        },
+      },
+    ]
+
+    await this.savedNewsService.registerGeneratedFile({
+      userId: input.userId,
+      title: this.buildTaxReportSavedTitle(),
+      content: [
+        '个税报表工作流已生成标准申报表文件。',
+        `识别发放记录表：${result.summary.totalPayoutFiles} 个`,
+        `识别结算发放表：${result.summary.totalSettlementFiles} 个`,
+        `合并人员数量：${result.summary.totalEmployees} 人`,
+      ].join('\n'),
+      fileName: result.outputFileName,
+      filePath: result.outputFilePath,
+      downloadUrl,
+      fileFormat: 'xlsx',
+    })
+
+    return { content, artifacts }
+  }
+
   private async getParsedWorkflowFromId(workflowId: string, invocation: string | undefined, message: string) {
     const workflow = await this.workflowService.getWorkflowById(workflowId)
 
@@ -192,6 +348,23 @@ export class WorkflowExecutionService {
       remainingInput: message,
       workflow,
     }
+  }
+
+  async getExecutionArtifact(userId: string, executionId: string, artifactId: string) {
+    const execution = WorkflowExecutionService.executions.find(
+      (item) => item.id === executionId && item.userId === userId
+    )
+
+    if (!execution) {
+      throw new Error('执行记录不存在')
+    }
+
+    const artifact = execution.artifacts.find((item) => item.id === artifactId)
+    if (!artifact || artifact.type !== 'file' || !artifact.filePath || !artifact.fileName) {
+      throw new Error('文件产物不存在')
+    }
+
+    return artifact
   }
 
   private buildSystemPrompt(workflow: WorkflowDefinition) {

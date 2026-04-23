@@ -9,6 +9,8 @@ router.get('/', (req, res) => configController.getConfig(req, res))
 router.get('/active-model', (req, res) => configController.getActiveAIModel(req, res))
 router.get('/workspace/asset', (req, res) => configController.getWorkspaceAsset(req, res))
 router.post('/workspace/upload', (req, res) => configController.uploadWorkspaceAsset(req, res))
+router.post('/workspace/import-folder', (req, res) => configController.importWorkspaceFolder(req, res))
+router.post('/workspace/open-folder', (req, res) => configController.openWorkspaceFolder(req, res))
 
 // 保存配置
 router.post('/', (req, res) => configController.saveConfig(req, res))

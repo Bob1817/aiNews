@@ -142,6 +142,7 @@ function normalizeConfigState(data: UserConfig): ConfigFormState {
     workspace: {
       rootPath: data.workspace?.rootPath || '',
       allowAiAccess: data.workspace?.allowAiAccess ?? true,
+      localWorkflowOnly: data.workspace?.localWorkflowOnly ?? false,
     },
   }
 }
@@ -193,6 +194,7 @@ export function Config() {
   const [testResults, setTestResults] = useState<{ [key: string]: string }>({})
   const [ollamaModels, setOllamaModels] = useState<Array<{ name: string; model: string }>>([])
   const [isFetchingModels, setIsFetchingModels] = useState(false)
+  const [showAiConfigPanel, setShowAiConfigPanel] = useState(false)
   const [showAddModelModal, setShowAddModelModal] = useState(false)
   const [newModel, setNewModel] = useState<{
     name: string
@@ -413,7 +415,10 @@ export function Config() {
             }
           : config.aiModel,
         publishPlatforms: config.publishPlatforms,
-        workspace: config.workspace,
+        workspace: {
+          ...config.workspace,
+          localWorkflowOnly: false,
+        },
         aiModels: [...config.aiModels, newModelWithId],
       })
 
@@ -552,6 +557,12 @@ export function Config() {
     return []
   }, [config.aiModel, config.aiModels])
 
+  const hasConfiguredAi = configuredModels.length > 0
+  const isLocalWorkflowOnly = config.workspace.localWorkflowOnly ?? false
+  const shouldShowAiIntro = !hasConfiguredAi && !isLocalWorkflowOnly && !showAiConfigPanel
+  const shouldShowLocalWorkflowCard = isLocalWorkflowOnly && !hasConfiguredAi
+  const shouldShowLocalWorkflowRestore = isLocalWorkflowOnly && hasConfiguredAi
+
   const currentModelId = useMemo(() => {
     return config.aiModel.id || config.aiModels.find((item) => item.isActive)?.id || configuredModels[0]?.id || null
   }, [config.aiModel.id, config.aiModels, configuredModels])
@@ -584,8 +595,9 @@ export function Config() {
             : resolvedActiveModel?.configuredModelName || resolvedActiveModel?.configuredName || '未设置',
       },
       { label: '目录', value: config.workspace.rootPath ? '已配置' : '未设置' },
+      { label: 'AI 模式', value: isLocalWorkflowOnly && !hasConfiguredAi ? '本地工作流模式' : '常规模式' },
     ],
-    [configuredModels.length, config.workspace.rootPath, resolvedActiveModel]
+    [configuredModels.length, config.workspace.rootPath, hasConfiguredAi, isLocalWorkflowOnly, resolvedActiveModel]
   )
 
   const beginEditing = (section: 'workspace' | 'website' | 'wechat') => {
@@ -633,7 +645,10 @@ export function Config() {
                     </button>
                   )}
                   <button
-                    onClick={() => setShowAddModelModal(true)}
+                    onClick={() => {
+                      setShowAiConfigPanel(true)
+                      setShowAddModelModal(true)
+                    }}
                     className="focus-ring inline-flex items-center gap-2 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-blue-700 transition-colors hover:bg-blue-100"
                   >
                     <Plus className="h-4 w-4" />
@@ -642,8 +657,160 @@ export function Config() {
                 </div>
               }
             >
-              {configuredModels.length > 0 ? (
+              {shouldShowAiIntro ? (
+                <div className="rounded-[28px] border border-blue-200 bg-gradient-to-br from-blue-50 via-white to-cyan-50 p-8">
+                  <div className="max-w-2xl space-y-5">
+                    <div className="inline-flex items-center rounded-full border border-blue-200 bg-white px-3 py-1 text-xs font-medium text-blue-700">
+                      AI 配置引导
+                    </div>
+                    <div>
+                      <h3 className="text-2xl font-semibold text-slate-900">先配置 AI，或者先用本地工作流</h3>
+                      <p className="mt-3 max-w-xl text-sm leading-6 text-editorial-muted">
+                        配置 AI 后可使用智能对话和 AI 工作流；如果暂时不配置，也可以先跳过，直接使用本地规则工作流。
+                      </p>
+                    </div>
+                    <div className="flex flex-col gap-3 sm:flex-row">
+                      <button
+                        onClick={() => setShowAiConfigPanel(true)}
+                        className="focus-ring inline-flex items-center justify-center rounded-2xl bg-slate-900 px-4 py-3 text-sm text-white transition-colors hover:bg-slate-800"
+                      >
+                        立即配置 AI
+                      </button>
+                      <button
+                        onClick={async () => {
+                          try {
+                            const updatedConfig = await updateConfig({
+                              userId: '1',
+                              aiModel: config.aiModel,
+                              aiModels: config.aiModels,
+                              publishPlatforms: config.publishPlatforms,
+                              workspace: {
+                                ...config.workspace,
+                                localWorkflowOnly: true,
+                              },
+                            })
+
+                            const normalized = normalizeConfigState(updatedConfig)
+                            setConfig(normalized)
+                            setPersistedConfig(normalized)
+                            setShowAiConfigPanel(false)
+                            setShowAddModelModal(false)
+                            showToast({
+                              title: '已启用本地工作流模式',
+                              variant: 'success',
+                            })
+                          } catch (error) {
+                            showToast({
+                              title: '保存配置失败',
+                              message: getErrorMessage(error, '请稍后重试'),
+                              variant: 'error',
+                            })
+                          }
+                        }}
+                        className="focus-ring inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 transition-colors hover:bg-slate-100"
+                      >
+                        跳过，先用本地工作流
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : shouldShowLocalWorkflowCard ? (
+                <div className="rounded-[28px] border border-emerald-200 bg-emerald-50 p-8">
+                  <div className="max-w-2xl space-y-5">
+                    <div className="inline-flex items-center rounded-full border border-emerald-200 bg-white px-3 py-1 text-xs font-medium text-emerald-700">
+                      已启用本地工作流模式
+                    </div>
+                    <div>
+                      <h3 className="text-2xl font-semibold text-slate-900">当前仅支持本地规则工作流</h3>
+                      <p className="mt-3 max-w-xl text-sm leading-6 text-editorial-muted">
+                        你可以继续使用像 /个税报表 这样的本地工作流。如果需要智能对话或 AI 工作流，请先恢复 AI 配置。
+                      </p>
+                    </div>
+                    <div className="flex flex-col gap-3 sm:flex-row">
+                      <button
+                        onClick={async () => {
+                          try {
+                            const updatedConfig = await updateConfig({
+                              userId: '1',
+                              aiModel: config.aiModel,
+                              aiModels: config.aiModels,
+                              publishPlatforms: config.publishPlatforms,
+                              workspace: {
+                                ...config.workspace,
+                                localWorkflowOnly: false,
+                              },
+                            })
+
+                            const normalized = normalizeConfigState(updatedConfig)
+                            setConfig(normalized)
+                            setPersistedConfig(normalized)
+                            setShowAiConfigPanel(true)
+                            showToast({
+                              title: '已恢复 AI 配置',
+                              variant: 'success',
+                            })
+                          } catch (error) {
+                            showToast({
+                              title: '保存配置失败',
+                              message: getErrorMessage(error, '请稍后重试'),
+                              variant: 'error',
+                            })
+                          }
+                        }}
+                        className="focus-ring inline-flex items-center justify-center rounded-2xl bg-slate-900 px-4 py-3 text-sm text-white transition-colors hover:bg-slate-800"
+                      >
+                        去配置 AI 模型
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : configuredModels.length > 0 ? (
                 <div className="space-y-3">
+                  {shouldShowLocalWorkflowRestore && (
+                    <div className="rounded-[24px] border border-amber-200 bg-amber-50 px-5 py-4">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <p className="text-sm font-medium text-amber-900">当前仍处于本地工作流模式</p>
+                          <p className="mt-1 text-sm leading-6 text-amber-800">
+                            已检测到可用 AI 模型。如需恢复智能对话与 AI 工作流，请关闭本地工作流模式。
+                          </p>
+                        </div>
+                        <button
+                          onClick={async () => {
+                            try {
+                              const updatedConfig = await updateConfig({
+                                userId: '1',
+                                aiModel: config.aiModel,
+                                aiModels: config.aiModels,
+                                publishPlatforms: config.publishPlatforms,
+                                workspace: {
+                                  ...config.workspace,
+                                  localWorkflowOnly: false,
+                                },
+                              })
+
+                              const normalized = normalizeConfigState(updatedConfig)
+                              setConfig(normalized)
+                              setPersistedConfig(normalized)
+                              showToast({
+                                title: '已恢复 AI 模式',
+                                variant: 'success',
+                              })
+                            } catch (error) {
+                              showToast({
+                                title: '保存配置失败',
+                                message: getErrorMessage(error, '请稍后重试'),
+                                variant: 'error',
+                              })
+                            }
+                          }}
+                          className="focus-ring inline-flex items-center justify-center rounded-2xl bg-slate-900 px-4 py-3 text-sm text-white transition-colors hover:bg-slate-800"
+                        >
+                          恢复 AI 对话
+                        </button>
+                      </div>
+                    </div>
+                  )}
                   {configuredModels.map((model) => {
                     const isCurrentModel = model.id === currentModelId
 

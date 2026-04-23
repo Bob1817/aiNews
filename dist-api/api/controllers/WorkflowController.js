@@ -68,12 +68,13 @@ class WorkflowController {
     }
     async execute(req, res) {
         try {
-            const { userId, message, referencedNewsId, history, invocation } = req.body;
+            const { userId, message, uploadedAssetPaths, referencedNewsId, history, invocation } = req.body;
             const result = await this.workflowExecutionService.execute({
                 userId,
                 workflowId: req.params.id,
                 invocation,
                 message,
+                uploadedAssetPaths,
                 referencedNewsId,
                 history,
             });
@@ -91,6 +92,19 @@ class WorkflowController {
         }
         catch (error) {
             res.status(500).json({ error: error instanceof Error ? error.message : '获取执行记录失败' });
+        }
+    }
+    async downloadArtifact(req, res) {
+        try {
+            const userId = String(req.query.userId || '1');
+            const artifact = await this.workflowExecutionService.getExecutionArtifact(userId, req.params.executionId, req.params.artifactId);
+            return res.download(artifact.filePath, artifact.fileName);
+        }
+        catch (error) {
+            return res.status(404).json({
+                error: '下载失败',
+                message: error instanceof Error ? error.message : '文件不存在',
+            });
         }
     }
 }

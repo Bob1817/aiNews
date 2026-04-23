@@ -11,6 +11,7 @@ import { ScheduledService } from './services/ScheduledService'
 
 const app = express()
 const PORT = env.PORT
+const HOST = env.HOST || '0.0.0.0'
 
 // 基础中间件
 app.use(express.json({ limit: '10mb' }))
@@ -58,12 +59,12 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
 new ScheduledService()
 
 // 启动服务器
-app.listen(PORT, () => {
+app.listen(PORT, HOST, () => {
   console.log('🚀 AI Assistant API 服务器启动成功')
   console.log('=' .repeat(50))
   console.log(`端口: ${PORT}`)
   console.log(`环境: ${env.NODE_ENV}`)
-  console.log(`地址: http://${env.HOST}:${PORT}`)
+  console.log(`地址: http://${HOST}:${PORT}`)
   console.log('=' .repeat(50))
 })
 

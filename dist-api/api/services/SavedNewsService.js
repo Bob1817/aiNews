@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.SavedNewsService = void 0;
 const promises_1 = require("node:fs/promises");
 const node_path_1 = __importDefault(require("node:path"));
+const xlsx_1 = __importDefault(require("xlsx"));
 const AICrawlerService_1 = require("./AICrawlerService");
 const ConfigService_1 = require("./ConfigService");
 const newsContentNormalizer_1 = require("./newsContentNormalizer");
@@ -96,6 +97,8 @@ class SavedNewsService {
         const normalizedNewsContent = (0, newsContentNormalizer_1.normalizeSavedNewsContent)({
             title: data.title,
             content: resolvedContent,
+        }, {
+            preferPlainTextBody: outputType === 'news',
         });
         const newNews = {
             id,
@@ -129,6 +132,60 @@ class SavedNewsService {
         }
         SavedNewsService.savedNews.push(newNews);
         return newNews;
+    }
+    async registerGeneratedFile(data) {
+        const id = Date.now().toString();
+        const newNews = {
+            id,
+            userId: data.userId,
+            title: data.title.trim() || '个税申报表',
+            content: data.content.trim(),
+            contentFormat: 'plain',
+            outputType: 'file',
+            fileName: data.fileName,
+            fileFormat: data.fileFormat,
+            filePath: data.filePath,
+            downloadUrl: data.downloadUrl,
+            isPublished: false,
+            publishedTo: [],
+            categories: data.categories || [],
+            industries: data.industries || [],
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+        };
+        SavedNewsService.savedNews.push(newNews);
+        return newNews;
+    }
+    async getWorkbookBySavedNewsId(id) {
+        const news = await this.getSavedNewsById(id);
+        if (!news || news.outputType !== 'file' || news.fileFormat !== 'xlsx' || !news.filePath) {
+            throw new Error('当前文件不支持工作簿预览');
+        }
+        const workbook = xlsx_1.default.readFile(news.filePath);
+        const sheets = workbook.SheetNames.map((sheetName) => ({
+            name: sheetName,
+            rows: xlsx_1.default.utils.sheet_to_json(workbook.Sheets[sheetName], {
+                header: 1,
+                raw: false,
+                defval: '',
+            }),
+        }));
+        return {
+            file: news,
+            sheetNames: workbook.SheetNames,
+            sheets,
+        };
+    }
+    async updateWorkbookBySavedNewsId(id, payload) {
+        const news = await this.getSavedNewsById(id);
+        if (!news || news.outputType !== 'file' || news.fileFormat !== 'xlsx' || !news.filePath) {
+            throw new Error('当前文件不支持工作簿编辑');
+        }
+        const workbook = xlsx_1.default.readFile(news.filePath);
+        workbook.Sheets[payload.sheetName] = xlsx_1.default.utils.aoa_to_sheet(payload.rows);
+        xlsx_1.default.writeFile(workbook, news.filePath);
+        news.updatedAt = new Date().toISOString();
+        return this.getWorkbookBySavedNewsId(id);
     }
     // 更新新闻
     async updateNews(id, data) {
@@ -166,8 +223,12 @@ class SavedNewsService {
     }
     // 删除新闻
     async deleteNews(id) {
+        const target = SavedNewsService.savedNews.find((news) => news.id === id);
         const initialLength = SavedNewsService.savedNews.length;
         SavedNewsService.savedNews = SavedNewsService.savedNews.filter((news) => news.id !== id);
+        if (target?.outputType === 'file' && target.filePath) {
+            await (0, promises_1.rm)(target.filePath, { force: true });
+        }
         return SavedNewsService.savedNews.length < initialLength;
     }
 }

@@ -19,6 +19,9 @@ router.post('/saved', (req, res) => newsController.saveNews(req, res));
 router.put('/saved/:id', (req, res) => newsController.updateNews(req, res));
 // 下载已保存文件
 router.get('/saved/:id/download', (req, res) => newsController.downloadSavedNewsFile(req, res));
+// 读取/保存工作簿
+router.get('/saved/:id/workbook', (req, res) => newsController.getSavedWorkbook(req, res));
+router.put('/saved/:id/workbook', (req, res) => newsController.updateSavedWorkbook(req, res));
 // 发布新闻
 router.post('/publish/:id', (req, res) => newsController.publishNews(req, res));
 // 删除新闻

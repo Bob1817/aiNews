@@ -1,21 +1,21 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   AlertCircle,
   ArrowLeft,
   CheckCircle2,
+  Eye,
   Globe,
+  Loader2,
   MessageSquare,
   Save,
   Share2,
 } from 'lucide-react'
 import { useToast } from '@/lib/toast'
 import { useAppStore } from '@/store'
-import type { NewsCategory, SavedNews } from '@/types'
+import type { SavedNews } from '@/types'
 import { getErrorMessage } from '@/lib/errors'
-import { getCategories } from '@/lib/api/categories'
 import { createSavedNews, getSavedNews, updateSavedNews, publishNews } from '@/lib/api/news'
-import { getDefaultCategories } from '@/lib/fallbacks'
 import { uploadWorkspaceAsset } from '@/lib/api/config'
 import { ArticleContent } from '@/components/ArticleContent'
 import { RichTextEditor } from '@/components/RichTextEditor'
@@ -56,6 +56,9 @@ export function NewsEdit() {
   const navigate = useNavigate()
   const { savedNews, setSavedNews } = useAppStore()
   const { showToast } = useToast()
+  const autoSaveTimerRef = useRef<number | null>(null)
+  const lastPersistedSignatureRef = useRef('')
+  const hasInitializedDraftRef = useRef(false)
 
   const [formData, setFormData] = useState({
     title: '',
@@ -65,12 +68,14 @@ export function NewsEdit() {
   })
   const [isSaving, setIsSaving] = useState(false)
   const [isPublishing, setIsPublishing] = useState(false)
-  const [showPublishOptions, setShowPublishOptions] = useState(false)
-  const [categories, setCategories] = useState<NewsCategory[]>([])
-  const [isLoadingCategories, setIsLoadingCategories] = useState(false)
+  const [showPreview, setShowPreview] = useState(false)
   const [isLoadingNews, setIsLoadingNews] = useState(Boolean(id))
   const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>([])
   const [editorResetKey, setEditorResetKey] = useState(0)
+  const [autoSaveState, setAutoSaveState] = useState<'idle' | 'typing' | 'saving' | 'saved' | 'error'>('idle')
+  const [lastSaveFeedback, setLastSaveFeedback] = useState('自动保存将在首次手动保存后启用')
+
+  const draftSignature = `${formData.title.trim()}::${formData.content.trim()}::${selectedPlatforms.slice().sort().join(',')}`
 
   const applyNewsToForm = (news: SavedNews) => {
     setFormData({
@@ -81,28 +86,11 @@ export function NewsEdit() {
     })
     setSelectedPlatforms(news.publishedTo || [])
     setEditorResetKey((current) => current + 1)
+    lastPersistedSignatureRef.current = `${news.title.trim()}::${convertContentToHtml(news.content, news.contentFormat).trim()}::${(news.publishedTo || []).slice().sort().join(',')}`
+    hasInitializedDraftRef.current = true
+    setAutoSaveState('saved')
+    setLastSaveFeedback(`上次保存于 ${new Date(news.updatedAt).toLocaleString('zh-CN')}`)
   }
-
-  useEffect(() => {
-    const fetchCategories = async () => {
-      setIsLoadingCategories(true)
-      try {
-        const data = await getCategories()
-        setCategories(data)
-      } catch {
-        setCategories(getDefaultCategories())
-        showToast({
-          title: '分类加载失败',
-          message: '已切换为默认分类。',
-          variant: 'info',
-        })
-      } finally {
-        setIsLoadingCategories(false)
-      }
-    }
-
-    fetchCategories()
-  }, [showToast])
 
   useEffect(() => {
     const loadNews = async () => {
@@ -150,14 +138,15 @@ export function NewsEdit() {
   const currentNews = id ? savedNews.find((item) => item.id === id) : null
   const plainTextContent = getContentExcerpt(formData.content, formData.contentFormat, Number.MAX_SAFE_INTEGER)
   const contentLength = plainTextContent.trim().length
-  const estimatedReadMinutes = Math.max(1, Math.ceil(contentLength / 450))
-  const selectedCategoryNames = useMemo(
-    () =>
-      formData.categories
-        .map((categoryId) => categories.find((item) => item.id === categoryId)?.name)
-        .filter(Boolean) as string[],
-    [categories, formData.categories]
-  )
+  const lastSavedAt = currentNews?.updatedAt ? new Date(currentNews.updatedAt).toLocaleString('zh-CN') : '尚未保存'
+
+  useEffect(() => {
+    return () => {
+      if (autoSaveTimerRef.current) {
+        window.clearTimeout(autoSaveTimerRef.current)
+      }
+    }
+  }, [])
 
   const readFileAsBase64 = (file: File) =>
     new Promise<string>((resolve, reject) => {
@@ -194,15 +183,29 @@ export function NewsEdit() {
     return result.data.assetUrl
   }
 
-  const handleSave = async () => {
+  const persistDraft = async ({
+    silent = false,
+    navigateAfterCreate = false,
+  }: {
+    silent?: boolean
+    navigateAfterCreate?: boolean
+  }) => {
     if (!formData.title.trim() || !plainTextContent.trim()) return
 
-    setIsSaving(true)
+    if (!silent) {
+      setIsSaving(true)
+    } else {
+      setAutoSaveState('saving')
+      setLastSaveFeedback('自动保存中...')
+    }
 
     try {
       if (id) {
         const data = await updateSavedNews(id, formData)
         setSavedNews(savedNews.map((news) => (news.id === id ? data.data : news)))
+        lastPersistedSignatureRef.current = draftSignature
+        setAutoSaveState('saved')
+        setLastSaveFeedback(`上次保存于 ${new Date(data.data.updatedAt).toLocaleString('zh-CN')}`)
       } else {
         const data = await createSavedNews({
           userId: '1',
@@ -210,25 +213,75 @@ export function NewsEdit() {
           industries: [],
         })
         setSavedNews([data.data as SavedNews, ...savedNews])
+        lastPersistedSignatureRef.current = `${data.data.title.trim()}::${data.data.content.trim()}::${(data.data.publishedTo || []).slice().sort().join(',')}`
+        hasInitializedDraftRef.current = true
+        setAutoSaveState('saved')
+        setLastSaveFeedback(`上次保存于 ${new Date(data.data.updatedAt).toLocaleString('zh-CN')}`)
+
+        if (navigateAfterCreate) {
+          navigate(`/news/edit/${data.data.id}`, { replace: true })
+        }
       }
 
-      showToast({
-        title: '保存成功',
-        message: id ? '内容已更新。' : '任务结果已创建。',
-        variant: 'success',
-      })
-      navigate('/news')
+      if (!silent) {
+        showToast({
+          title: '保存成功',
+          message: id ? '内容已更新。' : '任务结果已创建。',
+          variant: 'success',
+        })
+      }
     } catch (error) {
       console.error('保存新闻失败:', error)
-      showToast({
-        title: '保存失败',
-        message: getErrorMessage(error, '请稍后重试'),
-        variant: 'error',
-      })
+      if (!silent) {
+        showToast({
+          title: '保存失败',
+          message: getErrorMessage(error, '请稍后重试'),
+          variant: 'error',
+        })
+      }
+      setAutoSaveState('error')
+      setLastSaveFeedback(`保存失败：${getErrorMessage(error, '请稍后重试')}`)
     } finally {
-      setIsSaving(false)
+      if (!silent) {
+        setIsSaving(false)
+      }
     }
   }
+
+  const handleSave = async () => {
+    await persistDraft({ silent: false, navigateAfterCreate: !id })
+  }
+
+  useEffect(() => {
+    if (isLoadingNews || !hasInitializedDraftRef.current || !id) {
+      return
+    }
+
+    if (!formData.title.trim() || !plainTextContent.trim()) {
+      return
+    }
+
+    if (draftSignature === lastPersistedSignatureRef.current) {
+      return
+    }
+
+    setAutoSaveState('typing')
+    setLastSaveFeedback('检测到修改，等待自动保存...')
+
+    if (autoSaveTimerRef.current) {
+      window.clearTimeout(autoSaveTimerRef.current)
+    }
+
+    autoSaveTimerRef.current = window.setTimeout(() => {
+      void persistDraft({ silent: true })
+    }, 1500)
+
+    return () => {
+      if (autoSaveTimerRef.current) {
+        window.clearTimeout(autoSaveTimerRef.current)
+      }
+    }
+  }, [draftSignature, formData.title, formData.content, id, isLoadingNews, plainTextContent])
 
   const handlePublish = async (platforms: string[]) => {
     if (!id) return
@@ -250,7 +303,6 @@ export function NewsEdit() {
             : news
         )
       )
-      setShowPublishOptions(false)
       showToast({
         title: '发布成功',
         message: `已发布到 ${platforms.join('、')}`,
@@ -268,13 +320,10 @@ export function NewsEdit() {
     }
   }
 
-  const toggleCategory = (categoryId: string, checked: boolean) => {
-    setFormData((current) => ({
-      ...current,
-      categories: checked
-        ? [...current.categories, categoryId]
-        : current.categories.filter((item) => item !== categoryId),
-    }))
+  const togglePlatform = (platform: string) => {
+    setSelectedPlatforms((current) =>
+      current.includes(platform) ? current.filter((item) => item !== platform) : [...current, platform]
+    )
   }
 
   return (
@@ -288,44 +337,14 @@ export function NewsEdit() {
           返回任务结果
         </Link>
 
-        <section className="rounded-[32px] border border-slate-200 bg-white/95 p-8 shadow-[0_30px_80px_rgba(15,23,42,0.08)]">
-          <div className="flex flex-col items-center gap-6 xl:flex-row xl:items-start xl:justify-between">
-            <div className="max-w-3xl">
-              <p className="mt-5 text-xs font-semibold uppercase tracking-[0.28em] text-sky-600">
-                Editor Workspace
-              </p>
-              <h1 className="mt-3 font-display text-3xl text-slate-900 md:text-4xl">
-                {id ? '编辑任务结果' : '新建任务结果'}
-              </h1>
-            </div>
-
-            <div className="grid justify-items-center gap-3 sm:grid-cols-3 xl:min-w-[520px]">
-              <div className="w-36 rounded-[26px] border border-slate-200 bg-white px-4 py-4 text-center shadow-[0_20px_50px_rgba(15,23,42,0.05)]">
-                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">状态</p>
-                <p className="mt-3 text-2xl font-semibold text-slate-900">
-                  {currentNews?.isPublished ? '已发布' : '草稿'}
-                </p>
-              </div>
-              <div className="w-36 rounded-[26px] border border-slate-200 bg-white px-4 py-4 text-center shadow-[0_20px_50px_rgba(15,23,42,0.05)]">
-                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">正文长度</p>
-                <p className="mt-3 text-2xl font-semibold text-slate-900">{contentLength}</p>
-              </div>
-              <div className="w-36 rounded-[26px] border border-slate-200 bg-white px-4 py-4 text-center shadow-[0_20px_50px_rgba(15,23,42,0.05)]">
-                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">阅读时长</p>
-                <p className="mt-3 text-2xl font-semibold text-slate-900">{estimatedReadMinutes} 分钟</p>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <div className="grid min-h-0 flex-1 gap-6 xl:grid-cols-[minmax(0,1.4fr)_420px]">
-          <div className="min-h-0 space-y-6 overflow-y-auto pr-2">
+        <div className="grid min-h-0 flex-1 gap-6 xl:grid-cols-[minmax(0,1.4fr)_380px]">
+          <div className="min-h-0 overflow-hidden pr-2">
             <Panel
               title="内容编辑"
               description="正文以富文本方式编辑，支持标题、段落、列表、引用和图片插入。"
             >
-              <div className="space-y-5">
-                <div>
+              <div className="flex h-full min-h-0 flex-col gap-5">
+                <div className="sticky top-0 z-10 -mx-6 -mt-6 shrink-0 border-b border-slate-200 bg-white/96 px-6 pb-5 pt-6 backdrop-blur">
                   <label className="mb-2 block text-sm font-medium text-slate-700">标题</label>
                   <input
                     type="text"
@@ -336,10 +355,10 @@ export function NewsEdit() {
                   />
                 </div>
 
-                <div>
+                <div className="min-h-0 flex-1">
                   <label className="mb-2 block text-sm font-medium text-slate-700">正文</label>
                   {isLoadingNews ? (
-                    <div className="flex min-h-[520px] items-center justify-center rounded-[24px] border border-slate-200 bg-slate-50 text-sm text-slate-500">
+                    <div className="flex h-[min(72vh,900px)] items-center justify-center rounded-[24px] border border-slate-200 bg-slate-50 text-sm text-slate-500">
                       正在加载正文内容...
                     </div>
                   ) : (
@@ -360,125 +379,157 @@ export function NewsEdit() {
                 </div>
               </div>
             </Panel>
-
-            <Panel
-              title="分类归档"
-              description="将结果归入合适的分类，后续检索、统计和回看会更轻松。"
-            >
-              {isLoadingCategories ? (
-                <div className="rounded-2xl bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
-                  加载分类中...
-                </div>
-              ) : (
-                <div className="flex flex-wrap gap-3">
-                  {categories.map((category) => {
-                    const active = formData.categories.includes(category.id)
-                    return (
-                      <label
-                        key={category.id}
-                        className={`cursor-pointer rounded-2xl border px-4 py-3 text-sm font-medium transition ${
-                          active
-                            ? 'border-sky-300 bg-sky-50 text-sky-700 shadow-[0_12px_30px_rgba(14,165,233,0.12)]'
-                            : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300 hover:bg-white'
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={active}
-                          onChange={(e) => toggleCategory(category.id, e.target.checked)}
-                          className="sr-only"
-                        />
-                        {category.name}
-                      </label>
-                    )
-                  })}
-                </div>
-              )}
-            </Panel>
           </div>
 
-          <div className="min-h-0 flex flex-col gap-6 pr-2">
-            <div className="shrink-0">
+          <div className="min-h-0 pr-2">
+            <div className="sticky top-4">
               <Panel
                 title="操作面板"
                 description="先保存草稿，确认无误后再发布到外部渠道。"
               >
-                <div className="space-y-3">
-                  {currentNews?.isPublished && (
-                    <div className="flex items-center gap-2 rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700">
+                <div className="space-y-4">
+                  <div className="rounded-[24px] border border-slate-200 bg-[linear-gradient(180deg,#ffffff_0%,#f8fafc_100%)] p-4 shadow-[0_18px_34px_rgba(15,23,42,0.06)]">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">控制仓</p>
+                        <p className="mt-2 text-lg font-semibold text-slate-900">
+                          {currentNews?.isPublished ? '已发布稿件' : id ? '草稿编辑中' : '新建草稿'}
+                        </p>
+                      </div>
+                      <span
+                        className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${
+                          currentNews?.isPublished
+                            ? 'bg-emerald-50 text-emerald-700'
+                            : 'bg-amber-50 text-amber-700'
+                        }`}
+                      >
+                        {currentNews?.isPublished ? '已发布' : '草稿'}
+                      </span>
+                    </div>
+
+                    <div className="mt-4 grid gap-3 rounded-2xl bg-slate-50 p-3 text-sm text-slate-600">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-slate-500">最近保存</span>
+                        <span className="font-medium text-slate-900">{lastSavedAt}</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-slate-500">当前字数</span>
+                        <span className="font-medium text-slate-900">{contentLength}</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-slate-500">发布渠道</span>
+                        <span className="font-medium text-slate-900">
+                          {currentNews?.publishedTo?.length ? `${currentNews.publishedTo.length} 个渠道` : '尚未发布'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div
+                    className={`flex items-center gap-2 rounded-2xl px-3.5 py-3 text-sm font-medium ${
+                      autoSaveState === 'error'
+                        ? 'bg-rose-50 text-rose-700'
+                        : autoSaveState === 'saved'
+                          ? 'bg-emerald-50 text-emerald-700'
+                          : 'bg-slate-50 text-slate-600'
+                    }`}
+                  >
+                    {autoSaveState === 'saving' ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : autoSaveState === 'saved' ? (
                       <CheckCircle2 className="h-4 w-4" />
-                      该内容已发布，可继续编辑后再次同步。
+                    ) : (
+                      <Save className="h-4 w-4" />
+                    )}
+                    {lastSaveFeedback}
+                  </div>
+
+                  {currentNews?.isPublished && (
+                    <div className="flex items-center gap-2 rounded-2xl bg-emerald-50 px-3.5 py-3 text-sm font-medium text-emerald-700">
+                      <CheckCircle2 className="h-4 w-4" />
+                      当前内容已对外发布，修改后建议再次核验并同步。
+                    </div>
+                  )}
+
+                  <div className="rounded-2xl border border-slate-200 bg-white p-3">
+                    <p className="mb-3 text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">查看</p>
+                    <button
+                      onClick={() => setShowPreview(true)}
+                      className="flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+                    >
+                      <Eye className="h-4 w-4" />
+                      文章预览
+                    </button>
+                  </div>
+
+                  <div className="rounded-2xl border border-sky-100 bg-sky-50/60 p-3">
+                    <p className="mb-3 text-xs font-semibold uppercase tracking-[0.22em] text-sky-500">草稿</p>
+                    <button
+                      onClick={handleSave}
+                      disabled={isSaving}
+                      className="flex w-full items-center justify-center gap-2 rounded-2xl border border-sky-200 bg-white px-4 py-3 text-sm font-medium text-sky-700 transition hover:bg-sky-100 disabled:opacity-50"
+                    >
+                      <Save className="h-4 w-4" />
+                      {isSaving ? '保存中...' : '保存草稿'}
+                    </button>
+                  </div>
+
+                  {id ? (
+                    <div className="rounded-2xl border border-slate-200 bg-white p-3">
+                      <p className="mb-3 text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">发布</p>
+                      <div className="mb-3 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => togglePlatform('website')}
+                          className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-sm font-medium transition ${
+                            selectedPlatforms.includes('website')
+                              ? 'border-sky-300 bg-sky-50 text-sky-700'
+                              : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50'
+                          }`}
+                        >
+                          <Globe className="h-4 w-4" />
+                          官网新闻
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => togglePlatform('wechat')}
+                          className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-sm font-medium transition ${
+                            selectedPlatforms.includes('wechat')
+                              ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
+                              : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50'
+                          }`}
+                        >
+                          <MessageSquare className="h-4 w-4" />
+                          微信公众号
+                        </button>
+                      </div>
+                      <button
+                        onClick={() => {
+                          if (selectedPlatforms.length > 0) {
+                            void handlePublish(selectedPlatforms)
+                          }
+                        }}
+                        disabled={isPublishing || selectedPlatforms.length === 0}
+                        className="flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-medium text-white shadow-[0_14px_28px_rgba(15,23,42,0.14)] transition hover:bg-slate-800 disabled:opacity-50"
+                      >
+                        <Share2 className="h-4 w-4" />
+                        {isPublishing ? '发布中...' : selectedPlatforms.length === 0 ? '先选择渠道' : '发布到所选渠道'}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-3 text-sm leading-6 text-slate-500">
+                      先保存草稿，随后即可选择渠道发布。
                     </div>
                   )}
 
                   {id && (
-                    <button
-                      onClick={() => setShowPublishOptions(true)}
-                      disabled={isPublishing}
-                      className="flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-50"
-                    >
-                      <Share2 className="h-4 w-4" />
-                      {isPublishing ? '发布中...' : '发布到渠道'}
-                    </button>
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-500">
+                      已选择渠道：
+                      <span className="ml-1 font-medium text-slate-700">
+                        {selectedPlatforms.length > 0 ? selectedPlatforms.join('、') : '尚未选择'}
+                      </span>
+                    </div>
                   )}
-
-                  <button
-                    onClick={handleSave}
-                    disabled={isSaving}
-                    className="flex w-full items-center justify-center gap-2 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-medium text-sky-700 transition hover:bg-sky-100 disabled:opacity-50"
-                  >
-                    <Save className="h-4 w-4" />
-                    {isSaving ? '保存中...' : '保存草稿'}
-                  </button>
-                </div>
-              </Panel>
-            </div>
-
-            <div className="min-h-0 flex-1 overflow-y-auto">
-              <Panel
-                title="文章预览"
-                description="按最终阅读形态渲染正文，编辑时可实时检查排版、图片和段落层次。"
-              >
-                <div className="space-y-4">
-                  <div className="rounded-2xl bg-slate-50 p-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">标题预览</p>
-                    <p className="mt-2 text-base font-medium text-slate-900">
-                      {formData.title.trim() || '尚未填写标题'}
-                    </p>
-                  </div>
-
-                  <div className="rounded-2xl bg-slate-50 p-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">分类</p>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {selectedCategoryNames.length > 0 ? (
-                        selectedCategoryNames.map((name) => (
-                          <span
-                            key={name}
-                            className="rounded-full bg-violet-50 px-3 py-1 text-xs font-medium text-violet-700"
-                          >
-                            {name}
-                          </span>
-                        ))
-                      ) : (
-                        <span className="text-sm text-slate-500">尚未选择分类</span>
-                      )}
-                    </div>
-                  </div>
-
-                  <article className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-[0_16px_40px_rgba(15,23,42,0.05)]">
-                    <h3 className="font-display text-2xl text-slate-900">
-                      {formData.title.trim() || '尚未填写标题'}
-                    </h3>
-                    <div className="mt-4 border-t border-slate-100 pt-4">
-                      {plainTextContent.trim() ? (
-                        <ArticleContent content={formData.content} contentFormat={formData.contentFormat} />
-                      ) : (
-                        <p className="text-sm leading-7 text-slate-500">
-                          这里会显示文章最终预览，当前还没有正文内容。
-                        </p>
-                      )}
-                    </div>
-                  </article>
                 </div>
               </Panel>
             </div>
@@ -486,83 +537,36 @@ export function NewsEdit() {
         </div>
       </div>
 
-      {showPublishOptions && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 px-4 backdrop-blur-sm">
-          <div className="w-full max-w-lg rounded-[30px] border border-slate-200 bg-white p-7 shadow-[0_36px_100px_rgba(15,23,42,0.18)]">
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-sky-600">
-              Publish
-            </p>
-            <h3 className="mt-3 text-2xl font-semibold text-slate-900">选择发布渠道</h3>
-            <p className="mt-2 text-sm leading-7 text-slate-500">
-              可以先保存草稿，再选择将内容同步到官网新闻板块或微信公众号。
-            </p>
-
-            <div className="mt-6 space-y-3">
-              <label className="flex cursor-pointer items-center gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 transition hover:border-slate-300 hover:bg-white">
-                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-sky-100">
-                  <Globe className="h-5 w-5 text-sky-700" />
-                </div>
-                <div className="flex-1">
-                  <p className="font-medium text-slate-900">官网新闻板块</p>
-                  <p className="text-sm text-slate-500">适合正式发布的公开内容</p>
-                </div>
-                <input
-                  type="checkbox"
-                  className="h-5 w-5 rounded border-slate-300 text-sky-600"
-                  value="website"
-                  checked={selectedPlatforms.includes('website')}
-                  onChange={(e) => {
-                    setSelectedPlatforms((current) =>
-                      e.target.checked
-                        ? [...new Set([...current, 'website'])]
-                        : current.filter((platform) => platform !== 'website')
-                    )
-                  }}
-                />
-              </label>
-
-              <label className="flex cursor-pointer items-center gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 transition hover:border-slate-300 hover:bg-white">
-                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-100">
-                  <MessageSquare className="h-5 w-5 text-emerald-700" />
-                </div>
-                <div className="flex-1">
-                  <p className="font-medium text-slate-900">微信公众号</p>
-                  <p className="text-sm text-slate-500">适合推送给已有订阅用户</p>
-                </div>
-                <input
-                  type="checkbox"
-                  className="h-5 w-5 rounded border-slate-300 text-emerald-600"
-                  value="wechat"
-                  checked={selectedPlatforms.includes('wechat')}
-                  onChange={(e) => {
-                    setSelectedPlatforms((current) =>
-                      e.target.checked
-                        ? [...new Set([...current, 'wechat'])]
-                        : current.filter((platform) => platform !== 'wechat')
-                    )
-                  }}
-                />
-              </label>
+      {showPreview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 px-4 py-8 backdrop-blur-sm">
+          <div className="flex max-h-full w-full max-w-4xl flex-col overflow-hidden rounded-[32px] border border-slate-200 bg-white shadow-[0_36px_100px_rgba(15,23,42,0.2)]">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-8 py-6">
+              <div className="min-w-0">
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-sky-600">
+                  Preview
+                </p>
+                <h3 className="mt-2 line-clamp-2 text-2xl font-semibold text-slate-900">
+                  {formData.title.trim() || '尚未填写标题'}
+                </h3>
+              </div>
+              <button
+                onClick={() => setShowPreview(false)}
+                className="rounded-2xl bg-slate-100 px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-200"
+              >
+                关闭
+              </button>
             </div>
 
-            <div className="mt-7 flex gap-3">
-              <button
-                onClick={() => setShowPublishOptions(false)}
-                className="flex-1 rounded-2xl bg-slate-100 px-4 py-3 text-sm font-medium text-slate-700 transition hover:bg-slate-200"
-              >
-                取消
-              </button>
-              <button
-                onClick={() => {
-                  if (selectedPlatforms.length > 0) {
-                    handlePublish(selectedPlatforms)
-                  }
-                }}
-                disabled={isPublishing}
-                className="flex-1 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-50"
-              >
-                {isPublishing ? '发布中...' : '确认发布'}
-              </button>
+            <div className="overflow-y-auto px-8 py-6">
+              <article className="rounded-[24px] border border-slate-100 bg-slate-50/60 p-6">
+                {plainTextContent.trim() ? (
+                  <ArticleContent content={formData.content} contentFormat={formData.contentFormat} />
+                ) : (
+                  <p className="text-sm leading-7 text-slate-500">
+                    当前还没有可预览的正文内容。
+                  </p>
+                )}
+              </article>
             </div>
           </div>
         </div>

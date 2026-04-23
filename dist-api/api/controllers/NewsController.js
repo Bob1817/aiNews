@@ -108,6 +108,60 @@ class NewsController {
             });
         }
     }
+    async getSavedWorkbook(req, res) {
+        try {
+            const { id } = req.params;
+            if (!id) {
+                return res.status(400).json({
+                    error: '参数验证失败',
+                    message: '内容 ID 不能为空',
+                });
+            }
+            const workbook = await this.savedNewsService.getWorkbookBySavedNewsId(id);
+            return res.json({
+                success: true,
+                message: '工作簿读取成功',
+                data: workbook,
+            });
+        }
+        catch (error) {
+            console.error('读取工作簿错误:', error);
+            return res.status(500).json({
+                error: '读取工作簿失败',
+                message: error instanceof Error ? error.message : '未知错误',
+            });
+        }
+    }
+    async updateSavedWorkbook(req, res) {
+        try {
+            const { id } = req.params;
+            if (!id) {
+                return res.status(400).json({
+                    error: '参数验证失败',
+                    message: '内容 ID 不能为空',
+                });
+            }
+            if (!req.body?.sheetName || !Array.isArray(req.body?.rows)) {
+                return res.status(400).json({
+                    error: '参数验证失败',
+                    message: 'sheetName 和 rows 不能为空',
+                });
+            }
+            const workbook = await this.savedNewsService.updateWorkbookBySavedNewsId(id, req.body);
+            return res.json({
+                success: true,
+                message: '工作簿保存成功',
+                data: workbook,
+            });
+        }
+        catch (error) {
+            console.error('保存工作簿错误:', error);
+            return res.status(500).json({
+                error: '保存工作簿失败',
+                message: error instanceof Error ? error.message : '未知错误',
+            });
+        }
+    }
     // 更新新闻
     async updateNews(req, res) {
         try {

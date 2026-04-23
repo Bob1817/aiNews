@@ -19,7 +19,7 @@ export interface SavedNews {
   url?: string
   outputType?: 'news' | 'file'
   fileName?: string
-  fileFormat?: 'md' | 'txt' | 'json' | 'html'
+  fileFormat?: 'md' | 'txt' | 'json' | 'html' | 'xlsx'
   filePath?: string
   downloadUrl?: string
   isPublished: boolean
@@ -28,6 +28,22 @@ export interface SavedNews {
   industries?: string[]
   createdAt: string
   updatedAt: string
+}
+
+export interface WorkbookSheetData {
+  name: string
+  rows: string[][]
+}
+
+export interface WorkbookData {
+  file: SavedNews
+  sheetNames: string[]
+  sheets: WorkbookSheetData[]
+}
+
+export interface WorkbookUpdatePayload {
+  sheetName: string
+  rows: string[][]
 }
 
 export interface User {
@@ -93,6 +109,7 @@ export interface UserConfig {
   workspace: {
     rootPath: string
     allowAiAccess: boolean
+    localWorkflowOnly?: boolean
   }
   createdAt: string
   updatedAt: string
@@ -102,6 +119,8 @@ export interface ConversationMessage {
   id: string
   role: 'user' | 'assistant'
   content: string
+  uploadedFolderName?: string
+  uploadedFileNames?: string[]
   referencedNewsId?: string
   workflowId?: string
   workflowInvocation?: string
@@ -134,9 +153,14 @@ export interface WorkflowFieldDefinition {
 
 export interface WorkflowArtifact {
   id: string
-  type: 'text' | 'markdown' | 'news-draft' | 'summary'
+  type: 'text' | 'markdown' | 'news-draft' | 'summary' | 'file'
   title: string
   content: string
+  fileName?: string
+  filePath?: string
+  downloadUrl?: string
+  mimeType?: string
+  metadata?: Record<string, unknown>
 }
 
 export interface WorkflowDefinition {
@@ -155,6 +179,7 @@ export interface WorkflowDefinition {
   examples: string[]
   extensionNotes: string
   isBuiltIn: boolean
+  executionMode?: 'ai' | 'local'
   status: 'active' | 'draft'
   createdAt: string
   updatedAt: string

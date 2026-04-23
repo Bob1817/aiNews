@@ -149,6 +149,7 @@ export function getDefaultConfigForm(): {
     workspace: {
       rootPath: '',
       allowAiAccess: true,
+      localWorkflowOnly: false,
     },
   }
 }
@@ -177,6 +178,7 @@ export function getMockConfigForm() {
     workspace: {
       rootPath: '/Users/username/Documents/AI助手工作台',
       allowAiAccess: true,
+      localWorkflowOnly: false,
     },
   }
 }

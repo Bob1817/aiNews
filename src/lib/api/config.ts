@@ -1,6 +1,14 @@
 import type { ActiveAIModelInfo, UserConfig } from '@/types'
 import { apiRequest, apiUrl, withJsonBody } from '@/lib/api'
 
+export type UpdateConfigPayload = {
+  userId: string
+  aiModel: UserConfig['aiModel']
+  publishPlatforms: UserConfig['publishPlatforms']
+  workspace: UserConfig['workspace']
+  aiModels?: UserConfig['aiModels']
+}
+
 export function getConfig(userId: string) {
   return apiRequest<UserConfig>(`/api/config?userId=${encodeURIComponent(userId)}`)
 }
@@ -10,13 +18,7 @@ export async function getActiveAIModel(userId: string): Promise<ActiveAIModelInf
   return null
 }
 
-export function updateConfig(payload: {
-  userId: string
-  aiModel: UserConfig['aiModel']
-  publishPlatforms: UserConfig['publishPlatforms']
-  workspace: UserConfig['workspace']
-  aiModels?: UserConfig['aiModels']
-}) {
+export function updateConfig(payload: UpdateConfigPayload) {
   return apiRequest<UserConfig>('/api/config', withJsonBody(payload, { method: 'PUT' }))
 }
 
@@ -86,4 +88,35 @@ export function uploadWorkspaceAsset(payload: {
 
 export function getWorkspaceAssetUrl(relativePath: string, userId: string) {
   return apiUrl(`/api/config/workspace/asset?userId=${encodeURIComponent(userId)}&path=${encodeURIComponent(relativePath)}`)
+}
+
+export function importWorkspaceFolder(payload: {
+  userId: string
+  folderPath: string
+}) {
+  return apiRequest<{
+    success: boolean
+    message: string
+    data: {
+      folderName: string
+      folderPath: string
+      assets: Array<{
+        fileName: string
+        originalFileName: string
+        filePath: string
+        relativePath: string
+        mimeType: string
+      }>
+    }
+  }>('/api/config/workspace/import-folder', withJsonBody(payload, { method: 'POST' }))
+}
+
+export function openWorkspaceFolder(payload: {
+  userId: string
+  relativePath: string
+}) {
+  return apiRequest<{
+    success: boolean
+    message: string
+  }>('/api/config/workspace/open-folder', withJsonBody(payload, { method: 'POST' }))
 }

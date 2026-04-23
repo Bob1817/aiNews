@@ -4,9 +4,9 @@
   "description": "AI 助手桌面工作台",
   "main": "dist-electron/main.js",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --host 0.0.0.0",
     "build": "tsc && vite build",
-    "preview": "vite preview",
+    "preview": "vite preview --host 0.0.0.0",
     "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && electron .\"",
     "electron:build": "npm run build && electron-builder",
     "electron:build:mac": "npm run build && electron-builder --mac",
@@ -46,6 +46,7 @@
     "react-router-dom": "^6.21.0",
     "react-syntax-highlighter": "^16.1.1",
     "remark-gfm": "^4.0.1",
+    "xlsx": "^0.18.5",
     "zod": "^4.3.6",
     "zustand": "^4.4.7"
   },

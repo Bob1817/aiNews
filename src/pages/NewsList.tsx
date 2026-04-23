@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   Calendar,
   CheckCircle2,
@@ -11,6 +11,7 @@ import {
   FileJson,
   FileText,
   Filter,
+  Sparkles,
   MessageSquare,
   Search,
   Share2,
@@ -71,7 +72,10 @@ function FilterChip({
 }
 
 export function NewsList() {
+  const location = useLocation()
+  const navigate = useNavigate()
   const { savedNews, setSavedNews } = useAppStore()
+  const savedNewsList = Array.isArray(savedNews) ? savedNews : []
   const [filter, setFilter] = useState<'all' | 'published' | 'draft'>('all')
   const [searchKeyword, setSearchKeyword] = useState('')
   const [typeFilter, setTypeFilter] = useState<'all' | 'news' | 'file'>('all')
@@ -85,34 +89,38 @@ export function NewsList() {
   const [previewNews, setPreviewNews] = useState<SavedNews | null>(null)
   const [showPreview, setShowPreview] = useState(false)
   const [downloadMenuOpen, setDownloadMenuOpen] = useState<string | null>(null)
+  const [highlightedNewsId, setHighlightedNewsId] = useState<string | null>(null)
 
-  const getFileTypeIcon = (content: string) => {
+  const getSafeContent = (content: unknown) => (typeof content === 'string' ? content : '')
+
+  const getFileTypeIcon = (content: unknown) => {
+    const safeContent = getSafeContent(content)
     try {
-      JSON.parse(content)
+      JSON.parse(safeContent)
       return { icon: FileJson, color: 'text-fuchsia-500', label: 'JSON' }
     } catch {
       if (
-        content.includes('<p') ||
-        content.includes('<h1') ||
-        content.includes('<img') ||
-        content.includes('<div')
+        safeContent.includes('<p') ||
+        safeContent.includes('<h1') ||
+        safeContent.includes('<img') ||
+        safeContent.includes('<div')
       ) {
         return { icon: FileCode, color: 'text-amber-500', label: 'HTML' }
       }
       if (
-        content.includes('```') ||
-        content.includes('function ') ||
-        content.includes('import ') ||
-        content.includes('export ')
+        safeContent.includes('```') ||
+        safeContent.includes('function ') ||
+        safeContent.includes('import ') ||
+        safeContent.includes('export ')
       ) {
         return { icon: FileCode, color: 'text-sky-500', label: '代码' }
       }
       if (
-        content.includes('# ') ||
-        content.includes('## ') ||
-        content.includes('### ') ||
-        content.includes('**') ||
-        content.includes('* ')
+        safeContent.includes('# ') ||
+        safeContent.includes('## ') ||
+        safeContent.includes('### ') ||
+        safeContent.includes('**') ||
+        safeContent.includes('* ')
       ) {
         return { icon: FileText, color: 'text-emerald-500', label: 'Markdown' }
       }
@@ -120,17 +128,21 @@ export function NewsList() {
     }
   }
 
+  const isEditableWorkbook = (news: SavedNews) =>
+    news.outputType === 'file' && news.fileFormat === 'xlsx'
+
   const getTaskType = (news: SavedNews) => {
+    const safeContent = getSafeContent(news.content)
     if (news.outputType === 'file') {
       return { icon: FileText, label: '文件' }
     }
     if (news.outputType === 'news') {
       return { icon: MessageSquare, label: '新闻' }
     }
-    if (news.content.includes('工作流') || news.content.includes('workflow')) {
+    if (safeContent.includes('工作流') || safeContent.includes('workflow')) {
       return { icon: Workflow, label: '工作流结果' }
     }
-    if (news.content.includes('AI 助手') || news.content.includes('AI assistant')) {
+    if (safeContent.includes('AI 助手') || safeContent.includes('AI assistant')) {
       return { icon: MessageSquare, label: 'AI 对话' }
     }
     return { icon: FileText, label: '任务结果' }
@@ -243,8 +255,47 @@ export function NewsList() {
     fetchCategories()
   }, [setSavedNews])
 
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    const highlightId = params.get('highlight')
+
+    if (!highlightId) {
+      return
+    }
+
+    const target = savedNewsList.find((item) => item.id === highlightId)
+    if (!target) {
+      return
+    }
+
+    setHighlightedNewsId(highlightId)
+
+    const timer = window.setTimeout(() => {
+      const element = document.querySelector<HTMLElement>(`[data-news-id="${highlightId}"]`)
+      element?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 120)
+
+    const clearHighlightTimer = window.setTimeout(() => {
+      setHighlightedNewsId((current) => (current === highlightId ? null : current))
+      const nextParams = new URLSearchParams(location.search)
+      nextParams.delete('highlight')
+      navigate(
+        {
+          pathname: location.pathname,
+          search: nextParams.toString() ? `?${nextParams.toString()}` : '',
+        },
+        { replace: true }
+      )
+    }, 3200)
+
+    return () => {
+      window.clearTimeout(timer)
+      window.clearTimeout(clearHighlightTimer)
+    }
+  }, [location.pathname, location.search, navigate, savedNewsList])
+
   const filteredNews = useMemo(() => {
-    return (savedNews as SavedNewsWithIndustries[])
+    return (savedNewsList as SavedNewsWithIndustries[])
       .filter((news) => {
         if (filter === 'published' && !news.isPublished) return false
         if (filter === 'draft' && news.isPublished) return false
@@ -274,11 +325,11 @@ export function NewsList() {
 
         return sortOrder === 'asc' ? comparison : -comparison
       })
-  }, [filter, typeFilter, savedNews, searchKeyword, sortBy, sortOrder])
+  }, [filter, typeFilter, savedNewsList, searchKeyword, sortBy, sortOrder])
 
-  const publishedCount = savedNews.filter((item) => item.isPublished).length
-  const draftCount = savedNews.length - publishedCount
-  const fileCount = savedNews.filter((item) => item.outputType === 'file').length
+  const publishedCount = savedNewsList.filter((item) => item.isPublished).length
+  const draftCount = savedNewsList.length - publishedCount
+  const fileCount = savedNewsList.filter((item) => item.outputType === 'file').length
 
   const handleDelete = async () => {
     if (!deleteId) return
@@ -286,7 +337,7 @@ export function NewsList() {
     try {
       setIsDeleting(true)
       await deleteNews(deleteId)
-      setSavedNews(savedNews.filter((news) => news.id !== deleteId))
+      setSavedNews(savedNewsList.filter((news) => news.id !== deleteId))
     } catch (error) {
       console.error('删除新闻失败:', error)
     } finally {
@@ -309,7 +360,7 @@ export function NewsList() {
             </div>
 
             <div className="grid gap-3 sm:grid-cols-3 xl:min-w-[520px]">
-              <SummaryCard label="结果总数" value={String(savedNews.length)} />
+              <SummaryCard label="结果总数" value={String(savedNewsList.length)} />
               <SummaryCard label="已发布" value={String(publishedCount)} />
               <SummaryCard label="文件数量" value={String(fileCount)} />
             </div>
@@ -365,7 +416,7 @@ export function NewsList() {
           </div>
 
           <div className="mt-5 flex flex-wrap items-center gap-3">
-            <FilterChip active={filter === 'all'} label={`全部 ${savedNews.length}`} onClick={() => setFilter('all')} />
+            <FilterChip active={filter === 'all'} label={`全部 ${savedNewsList.length}`} onClick={() => setFilter('all')} />
             <FilterChip active={filter === 'published'} label={`已发布 ${publishedCount}`} onClick={() => setFilter('published')} />
             <FilterChip active={filter === 'draft'} label={`草稿 ${draftCount}`} onClick={() => setFilter('draft')} />
             <div className="ml-auto text-sm text-slate-500">
@@ -399,8 +450,19 @@ export function NewsList() {
               return (
                 <article
                   key={news.id}
-                  className="group flex min-h-[440px] flex-col overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_22px_50px_rgba(15,23,42,0.05)] transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_26px_70px_rgba(15,23,42,0.09)]"
+                  data-news-id={news.id}
+                  className={`group relative flex min-h-[440px] flex-col overflow-hidden rounded-[28px] border bg-white transition duration-200 hover:-translate-y-0.5 ${
+                    highlightedNewsId === news.id
+                      ? 'border-sky-300 ring-4 ring-sky-100 shadow-[0_0_0_1px_rgba(125,211,252,0.45),0_30px_80px_rgba(14,165,233,0.18)]'
+                      : 'border-slate-200 shadow-[0_22px_50px_rgba(15,23,42,0.05)] hover:shadow-[0_26px_70px_rgba(15,23,42,0.09)]'
+                  }`}
                 >
+                  {highlightedNewsId === news.id && (
+                    <div className="pointer-events-none absolute left-6 top-5 z-10 inline-flex items-center gap-2 rounded-full border border-sky-200 bg-white/96 px-3.5 py-2 text-xs font-medium text-sky-700 shadow-[0_16px_32px_rgba(14,165,233,0.16)] backdrop-blur">
+                      <Sparkles className="h-3.5 w-3.5" />
+                      已由新闻助手自动生成并保存
+                    </div>
+                  )}
                   <div className="relative aspect-[16/9] overflow-hidden bg-slate-100">
                     <img
                       src={coverImage}
@@ -430,16 +492,27 @@ export function NewsList() {
                     </div>
 
                     <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => {
-                          setPreviewNews(news)
-                          setShowPreview(true)
-                        }}
-                        className="rounded-xl border border-slate-200 p-2 text-slate-500 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
-                        title="预览"
-                      >
-                        <Eye className="h-4 w-4" />
-                      </button>
+                      {isEditableWorkbook(news) ? (
+                        <Link
+                          to={`/news/file/${news.id}`}
+                          aria-label="预览文件"
+                          className="rounded-xl border border-slate-200 p-2 text-slate-500 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
+                          title="预览文件"
+                        >
+                          <Eye className="h-4 w-4" />
+                        </Link>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            setPreviewNews(news)
+                            setShowPreview(true)
+                          }}
+                          className="rounded-xl border border-slate-200 p-2 text-slate-500 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
+                          title="预览"
+                        >
+                          <Eye className="h-4 w-4" />
+                        </button>
+                      )}
                       {news.url && (
                         <a
                           href={news.url}
@@ -510,13 +583,24 @@ export function NewsList() {
                   </div>
 
                   <div className="mt-auto flex flex-wrap items-center gap-3 pt-6">
-                    <Link
-                      to={`/news/edit/${news.id}`}
-                      className="inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-slate-800"
-                    >
-                      <Edit className="h-4 w-4" />
-                      编辑内容
-                    </Link>
+                    {isEditableWorkbook(news) ? (
+                      <Link
+                        to={`/news/file/${news.id}?mode=edit`}
+                        aria-label="编辑文件"
+                        className="inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-slate-800"
+                      >
+                        <Edit className="h-4 w-4" />
+                        编辑文件
+                      </Link>
+                    ) : (
+                      <Link
+                        to={`/news/edit/${news.id}`}
+                        className="inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-slate-800"
+                      >
+                        <Edit className="h-4 w-4" />
+                        编辑内容
+                      </Link>
+                    )}
 
                     <div className="relative">
                       {news.outputType === 'file' ? (

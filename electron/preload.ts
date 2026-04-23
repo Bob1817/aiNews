@@ -5,6 +5,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   sendNotification: (title: string, body: string) => {
     return ipcRenderer.invoke('send-notification', title, body)
   },
+  selectDirectory: () => {
+    return ipcRenderer.invoke('select-directory') as Promise<string | null>
+  },
+  openPath: (targetPath: string) => {
+    return ipcRenderer.invoke('open-path', targetPath) as Promise<boolean>
+  },
 })
 
 declare global {
@@ -12,6 +18,8 @@ declare global {
     electronAPI: {
       platform: string
       sendNotification: (title: string, body: string) => Promise<boolean>
+      selectDirectory: () => Promise<string | null>
+      openPath: (targetPath: string) => Promise<boolean>
     }
   }
 }

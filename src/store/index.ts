@@ -8,6 +8,12 @@ import type {
   WorkflowExecution,
 } from '@/types'
 
+type WorkflowExecutionMode = 'ai' | 'local'
+
+type WorkflowDefinitionWithExecutionMode = WorkflowDefinition & {
+  executionMode?: WorkflowExecutionMode
+}
+
 interface AppState {
   newsArticles: NewsArticle[]
   savedNews: SavedNews[]
@@ -118,6 +124,61 @@ const persistConversationHistories = (histories: ConversationHistory[]) => {
   }
 }
 
+const normalizeSavedNews = (value: unknown): SavedNews[] => {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value.filter(
+    (item): item is SavedNews =>
+      !!item &&
+      typeof item === 'object' &&
+      typeof item.id === 'string' &&
+      typeof item.userId === 'string' &&
+      typeof item.title === 'string' &&
+      typeof item.content === 'string'
+  )
+}
+
+const normalizeWorkflowDefinitions = (value: unknown): WorkflowDefinition[] => {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value.map((item) => {
+    if (!item || typeof item !== 'object') {
+      return item as WorkflowDefinition
+    }
+
+    const workflow = item as WorkflowDefinitionWithExecutionMode
+
+    return {
+      ...workflow,
+      executionMode: workflow.executionMode || (workflow.id === 'workflow-tax-report' ? 'local' : 'ai'),
+    }
+  })
+}
+
+const normalizeWorkflowExecutions = (value: unknown): WorkflowExecution[] => {
+  return Array.isArray(value) ? value : []
+}
+
+const normalizeConversationMessages = (value: unknown): ConversationMessage[] => {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value.filter(
+    (message): message is ConversationMessage =>
+      !!message &&
+      typeof message === 'object' &&
+      typeof message.id === 'string' &&
+      (message.role === 'user' || message.role === 'assistant') &&
+      typeof message.content === 'string' &&
+      typeof message.timestamp === 'string'
+  )
+}
+
 export const useAppStore = create<AppState>((set) => ({
   newsArticles: [],
   savedNews: [],
@@ -130,16 +191,17 @@ export const useAppStore = create<AppState>((set) => ({
   selectedWorkflow: null,
   isLoading: false,
 
-  setNewsArticles: (articles) => set({ newsArticles: articles }),
-  setSavedNews: (news) => set({ savedNews: news }),
-  setConversationMessages: (messages) => set({ conversationMessages: messages }),
+  setNewsArticles: (articles) => set({ newsArticles: Array.isArray(articles) ? articles : [] }),
+  setSavedNews: (news) => set({ savedNews: normalizeSavedNews(news) }),
+  setConversationMessages: (messages) => set({ conversationMessages: normalizeConversationMessages(messages) }),
   addConversationMessage: (message) =>
     set((state) => ({
       conversationMessages: [...state.conversationMessages, message],
     })),
   setConversationHistories: (histories) => {
-    persistConversationHistories(histories)
-    set({ conversationHistories: histories })
+    const normalizedHistories = Array.isArray(histories) ? histories : []
+    persistConversationHistories(normalizedHistories)
+    set({ conversationHistories: normalizedHistories })
   },
   upsertConversationHistory: (history) =>
     set((state) => {
@@ -173,8 +235,8 @@ export const useAppStore = create<AppState>((set) => ({
       }
     }),
   setCurrentConversationId: (conversationId) => set({ currentConversationId: conversationId }),
-  setWorkflows: (workflows) => set({ workflows }),
-  setWorkflowExecutions: (workflowExecutions) => set({ workflowExecutions }),
+  setWorkflows: (workflows) => set({ workflows: normalizeWorkflowDefinitions(workflows) }),
+  setWorkflowExecutions: (workflowExecutions) => set({ workflowExecutions: normalizeWorkflowExecutions(workflowExecutions) }),
   addWorkflowExecution: (execution) =>
     set((state) => ({
       workflowExecutions: [execution, ...state.workflowExecutions],
@@ -183,7 +245,7 @@ export const useAppStore = create<AppState>((set) => ({
   setSelectedWorkflow: (workflow) => set({ selectedWorkflow: workflow }),
   setIsLoading: (loading) => set({ isLoading: loading }),
   clearConversationMessages: () => set({ conversationMessages: [], currentConversationId: null }),
-  loadConversationMessages: (messages) => set({ conversationMessages: messages }),
+  loadConversationMessages: (messages) => set({ conversationMessages: normalizeConversationMessages(messages) }),
   startNewConversation: () =>
     set({
       conversationMessages: [],

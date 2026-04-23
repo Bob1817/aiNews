@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, Tray, nativeImage, Notification, ipcMain } from 'electron'
+import { app, BrowserWindow, Menu, Tray, nativeImage, Notification, ipcMain, dialog, shell } from 'electron'
 import path from 'path'
 import { createMenu } from './menu'
 
@@ -84,6 +84,28 @@ app.whenReady().then(() => {
       icon: path.join(__dirname, '../resources/icons/icon.png')
     }).show()
     return true
+  })
+
+  ipcMain.handle('select-directory', async () => {
+    const targetWindow = BrowserWindow.getFocusedWindow() || mainWindow
+    const result = await dialog.showOpenDialog(targetWindow || undefined, {
+      properties: ['openDirectory'],
+    })
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return null
+    }
+
+    return result.filePaths[0]
+  })
+
+  ipcMain.handle('open-path', async (_event, targetPath: string) => {
+    if (!targetPath) {
+      return false
+    }
+
+    const result = await shell.openPath(targetPath)
+    return result === ''
   })
   
   app.on('activate', () => {

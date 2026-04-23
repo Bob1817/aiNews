@@ -44,4 +44,33 @@ describe('normalizeSavedNewsContent', () => {
     expect(normalized.content).toBe(content)
     expect(normalized.contentFormat).toBe('plain')
   })
+
+  test('should extract labeled title and strip markdown symbols for news bodies when plain text is preferred', () => {
+    const normalized = normalizeSavedNewsContent(
+      {
+        title: '',
+        content: `标题：智谱发布新一代企业模型能力平台
+
+正文：
+## 核心进展
+
+**智谱** 面向企业场景发布了新的模型能力平台，并强调私有化部署与推理效率。
+
+- 支持多模型统一接入
+- 提供更完整的安全与权限控制`,
+      },
+      {
+        preferPlainTextBody: true,
+      }
+    )
+
+    expect(normalized.title).toBe('智谱发布新一代企业模型能力平台')
+    expect(normalized.content).toContain('智谱 面向企业场景发布了新的模型能力平台')
+    expect(normalized.content).toContain('支持多模型统一接入')
+    expect(normalized.content).not.toContain('标题：')
+    expect(normalized.content).not.toContain('正文：')
+    expect(normalized.content).not.toContain('##')
+    expect(normalized.content).not.toContain('**')
+    expect(normalized.contentFormat).toBe('plain')
+  })
 })

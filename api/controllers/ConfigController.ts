@@ -1,5 +1,6 @@
+import { spawn } from 'node:child_process'
 import { Request, Response } from 'express'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readdir, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { ConfigService } from '../services/ConfigService'
 
@@ -20,6 +21,36 @@ export class ConfigController {
       ext: ext || '',
       safeBaseName,
     }
+  }
+
+  private shouldIgnoreImportedPath(relativePath: string) {
+    const normalized = relativePath.replace(/\\/g, '/')
+    const segments = normalized.split('/').filter(Boolean).map((item) => item.toLowerCase())
+    return segments.includes('output') || segments.includes('generated')
+  }
+
+  private async collectImportableFiles(rootPath: string, currentPath: string, files: string[] = []) {
+    const entries = await readdir(currentPath, { withFileTypes: true })
+
+    for (const entry of entries) {
+      const absolutePath = path.join(currentPath, entry.name)
+      const relativePath = path.relative(rootPath, absolutePath)
+
+      if (this.shouldIgnoreImportedPath(relativePath)) {
+        continue
+      }
+
+      if (entry.isDirectory()) {
+        await this.collectImportableFiles(rootPath, absolutePath, files)
+        continue
+      }
+
+      if (entry.isFile() && /\.(xlsx|xls)$/i.test(entry.name)) {
+        files.push(absolutePath)
+      }
+    }
+
+    return files
   }
 
   private async resolveOllamaModelName(aiModel: {
@@ -400,6 +431,75 @@ export class ConfigController {
     }
   }
 
+  async importWorkspaceFolder(req: Request, res: Response) {
+    try {
+      const { userId, folderPath } = req.body as {
+        userId?: string
+        folderPath?: string
+      }
+
+      if (!userId || !folderPath) {
+        return res.status(400).json({
+          error: '参数错误',
+          message: '请提供 userId 和 folderPath',
+        })
+      }
+
+      const sourceStat = await stat(folderPath)
+      if (!sourceStat.isDirectory()) {
+        return res.status(400).json({
+          error: '参数错误',
+          message: '请选择有效的文件夹',
+        })
+      }
+
+      const config = await this.configService.getConfig(userId)
+      const uploadsDir = path.join(config.workspace.rootPath, 'uploads')
+      await mkdir(uploadsDir, { recursive: true })
+
+      const sourceFiles = await this.collectImportableFiles(folderPath, folderPath)
+      if (sourceFiles.length === 0) {
+        return res.status(400).json({
+          error: '未找到文件',
+          message: '所选文件夹中没有可用的 Excel 文件',
+        })
+      }
+
+      const assets = []
+      for (const sourceFile of sourceFiles) {
+        const originalFileName = path.basename(sourceFile)
+        const { ext, safeBaseName } = this.sanitizeFileName(originalFileName)
+        const savedFileName = `${safeBaseName}-${Date.now()}-${assets.length}${ext}`
+        const savedFilePath = path.join(uploadsDir, savedFileName)
+        await copyFile(sourceFile, savedFilePath)
+
+        assets.push({
+          fileName: savedFileName,
+          originalFileName,
+          filePath: savedFilePath,
+          relativePath: `uploads/${savedFileName}`,
+          mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        })
+      }
+
+      return res.json({
+        success: true,
+        message: '文件夹导入成功',
+        data: {
+          folderName: path.basename(folderPath),
+          folderPath,
+          assets,
+        },
+      })
+    } catch (error) {
+      console.error('导入本地文件夹失败:', error)
+      return res.status(500).json({
+        error: '导入本地文件夹失败',
+        message: error instanceof Error ? error.message : '未知错误',
+      })
+    }
+  }
+
   async getWorkspaceAsset(req: Request, res: Response) {
     try {
       const userId = String(req.query.userId || '')
@@ -435,6 +535,61 @@ export class ConfigController {
       console.error('读取工作文件失败:', error)
       return res.status(500).json({
         error: '读取工作文件失败',
+        message: error instanceof Error ? error.message : '未知错误',
+      })
+    }
+  }
+
+  async openWorkspaceFolder(req: Request, res: Response) {
+    try {
+      const { userId, relativePath } = req.body as {
+        userId?: string
+        relativePath?: string
+      }
+
+      if (!userId || !relativePath) {
+        return res.status(400).json({
+          error: '参数错误',
+          message: '请提供 userId 和 relativePath',
+        })
+      }
+
+      const config = await this.configService.getConfig(userId)
+      const uploadsDir = path.resolve(config.workspace.rootPath, 'uploads')
+      const absolutePath = path.resolve(config.workspace.rootPath, relativePath)
+
+      if (!absolutePath.startsWith(`${uploadsDir}${path.sep}`) && absolutePath !== uploadsDir) {
+        return res.status(403).json({
+          error: '访问被拒绝',
+          message: '无权打开该目录',
+        })
+      }
+
+      const folderStat = await stat(absolutePath)
+      if (!folderStat.isDirectory()) {
+        return res.status(400).json({
+          error: '参数错误',
+          message: '目标路径不是文件夹',
+        })
+      }
+
+      const command =
+        process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'explorer' : 'xdg-open'
+
+      const child = spawn(command, [absolutePath], {
+        detached: true,
+        stdio: 'ignore',
+      })
+      child.unref()
+
+      return res.json({
+        success: true,
+        message: '文件夹已打开',
+      })
+    } catch (error) {
+      console.error('打开工作区目录失败:', error)
+      return res.status(500).json({
+        error: '打开工作区目录失败',
         message: error instanceof Error ? error.message : '未知错误',
       })
     }

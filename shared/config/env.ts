@@ -5,7 +5,7 @@ export const envSchema = z.object({
   // 应用配置
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.preprocess(Number, z.number()).default(3001),
-  HOST: z.string().default('localhost'),
+  HOST: z.string().default('0.0.0.0'),
 
   // 数据库配置
   DATABASE_URL: z.string().default('postgresql://localhost:5432/ainews'),

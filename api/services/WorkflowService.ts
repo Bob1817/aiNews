@@ -15,10 +15,10 @@ function createBuiltInNewsWorkflow(): WorkflowDefinition {
     invocation: {
       primary: '/新闻助手',
       aliases: ['/+新闻助手', '/news-assistant', '/+news-assistant'],
-      examples: [
-        '/新闻助手 基于今天的 AI 医疗新闻写一篇公众号导语',
-        '/+news-assistant 帮我整理这条新闻的三段式摘要',
-      ],
+    examples: [
+      '/新闻助手 基于今天的 AI 医疗新闻写一篇公众号导语',
+      '/+news-assistant 帮我整理这条新闻的三段式摘要',
+    ],
     },
     systemInstruction:
       '你是 AI 助手中的内置新闻助手工作流。必须严格围绕给定新闻材料和工作流步骤执行，优先产出专业、准确、可直接继续编辑的新闻内容。',
@@ -62,6 +62,7 @@ function createBuiltInNewsWorkflow(): WorkflowDefinition {
     ],
     extensionNotes: '后续可扩展更多新闻领域模板，例如行业快报、公众号稿件、短视频口播稿。',
     isBuiltIn: true,
+    executionMode: 'ai',
     status: 'active',
     createdAt: now,
     updatedAt: now,
@@ -124,6 +125,68 @@ function createBuiltInNewsDigestWorkflow(): WorkflowDefinition {
     ],
     extensionNotes: '该工作流以 AI 爬虫为核心执行方式，后续可扩展到更真实的网页抓取、信源打分和主题去重。',
     isBuiltIn: true,
+    executionMode: 'ai',
+    status: 'active',
+    createdAt: now,
+    updatedAt: now,
+  }
+}
+
+function createBuiltInTaxReportWorkflow(): WorkflowDefinition {
+  const now = createTimestamp()
+
+  return {
+    id: 'workflow-tax-report',
+    name: 'tax-report',
+    displayName: '个税报表',
+    description: '上传包含发放记录表和结算发放表的文件夹，按身份证号聚合并生成标准个税申报表。',
+    invocation: {
+      primary: '/个税报表',
+      aliases: ['/+个税报表', '/tax-report', '/+tax-report'],
+      examples: [
+        '/个税报表 生成本月个税申报表',
+        '/+tax-report 请根据上传文件夹生成标准申报表',
+      ],
+    },
+    systemInstruction:
+      '你是 AI 助手中的内置个税报表工作流。该工作流不依赖大模型生成内容，必须严格按固定 Excel 规则处理上传文件并返回标准个税申报表。',
+    steps: [
+      {
+        id: 'validate-input-folder',
+        title: '校验输入',
+        instruction: '确认用户已上传文件夹中的 Excel 文件，且至少识别到一个发放记录表。',
+      },
+      {
+        id: 'merge-tax-data',
+        title: '合并数据',
+        instruction: '以发放记录表为主数据，按身份证号聚合，并将结算发放表中的收入与社保数据按规则合并。',
+      },
+      {
+        id: 'export-template',
+        title: '生成申报表',
+        instruction: '使用固定个税申报表模板生成结果文件；模板字段不可改动，缺失值填 0.00。',
+        expectedOutput: '返回可下载的标准个税申报表文件。',
+      },
+    ],
+    inputSchema: [
+      { name: 'task', type: 'textarea', label: '任务说明', placeholder: '例如：生成 2026 年 3 月个税申报表' },
+    ],
+    outputSchema: [{ name: 'file', type: 'text', label: '申报表文件', required: true }],
+    constraints: [
+      '必须至少存在一个发放记录表，否则直接报错。',
+      '不可依赖文件名识别表格类型，必须按表头结构识别。',
+      '个税申报表模板字段不可修改。',
+      '缺失数据必须填 0.00，同一身份证号码多条数据必须合并累加。',
+    ],
+    tools: ['workspace-upload', 'excel-processing', 'file-download'],
+    capabilities: ['tax-report', 'excel-merge', 'template-export'],
+    examples: [
+      '上传一个包含多个 Excel 的文件夹，自动生成个税申报表',
+      '同身份证多条记录自动合并后导出标准模板',
+    ],
+    extensionNotes: '该工作流为固定规则流程，后续可扩展更完整的字段映射与校验报告。',
+    isBuiltIn: true,
+    executionMode: 'local',
     status: 'active',
     createdAt: now,
     updatedAt: now,
@@ -131,7 +194,11 @@ function createBuiltInNewsDigestWorkflow(): WorkflowDefinition {
 }
 
 export class WorkflowService {
-  private static workflows: WorkflowDefinition[] = [createBuiltInNewsDigestWorkflow(), createBuiltInNewsWorkflow()]
+  private static workflows: WorkflowDefinition[] = [
+    createBuiltInTaxReportWorkflow(),
+    createBuiltInNewsDigestWorkflow(),
+    createBuiltInNewsWorkflow(),
+  ]
 
   async listWorkflows(): Promise<WorkflowDefinition[]> {
     return [...WorkflowService.workflows].sort((a, b) => {
@@ -171,6 +238,7 @@ export class WorkflowService {
       examples: input.examples || [],
       extensionNotes: String(input.extensionNotes || '').trim(),
       isBuiltIn: false,
+      executionMode: input.executionMode || 'ai',
       status: input.status === 'draft' ? 'draft' : 'active',
       createdAt: now,
       updatedAt: now,
