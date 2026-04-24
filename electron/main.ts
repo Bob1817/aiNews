@@ -1,4 +1,5 @@
 import { app, BrowserWindow, Menu, Tray, nativeImage, Notification, ipcMain, dialog, shell } from 'electron'
+import { autoUpdater } from 'electron-updater'
 import path from 'path'
 import { fork, ChildProcess } from 'child_process'
 import { createMenu } from './menu'
@@ -6,12 +7,13 @@ import { createMenu } from './menu'
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 let apiServerProcess: ChildProcess | null = null
+let updateAvailable = false
+let updateDownloaded = false
+
+const isDev = !!process.env.VITE_DEV_SERVER_URL
+const CHECK_UPDATE_INTERVAL = 24 * 60 * 60 * 1000 // 24小时
 
 function startApiServer() {
-  // 只在生产环境或非开发服务器模式下启动API服务器
-  // 在开发模式下，API服务器应该通过 npm run dev:full 启动
-  const isDev = !!process.env.VITE_DEV_SERVER_URL
-
   if (!isDev) {
     try {
       const apiServerPath = path.join(__dirname, '../dist-api/api/index.js')
@@ -59,7 +61,8 @@ function createWindow() {
     height: 800,
     minWidth: 800,
     minHeight: 600,
-    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+    frame: false,
+    titleBarStyle: 'hidden',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
@@ -67,8 +70,8 @@ function createWindow() {
     },
   })
 
-  if (process.env.VITE_DEV_SERVER_URL) {
-    mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL)
+  if (isDev) {
+    mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL!)
     mainWindow.webContents.openDevTools()
   } else {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
@@ -83,6 +86,22 @@ function createWindow() {
       e.preventDefault()
       mainWindow?.hide()
     }
+  })
+
+  mainWindow.on('maximize', () => {
+    mainWindow?.webContents.send('window-state-changed', 'maximized')
+  })
+
+  mainWindow.on('unmaximize', () => {
+    mainWindow?.webContents.send('window-state-changed', 'unmaximized')
+  })
+
+  mainWindow.on('enter-full-screen', () => {
+    mainWindow?.webContents.send('window-state-changed', 'fullscreen')
+  })
+
+  mainWindow.on('leave-full-screen', () => {
+    mainWindow?.webContents.send('window-state-changed', 'unfullscreen')
   })
 }
 
@@ -116,10 +135,75 @@ function createTray() {
   })
 }
 
-app.whenReady().then(() => {
-  // 启动API服务器
-  startApiServer()
+function setupAutoUpdater() {
+  if (isDev) {
+    console.log('开发模式：禁用自动更新')
+    return
+  }
 
+  autoUpdater.autoDownload = false
+  autoUpdater.autoInstallOnAppQuit = true
+
+  autoUpdater.on('checking-for-update', () => {
+    mainWindow?.webContents.send('update-status', { status: 'checking' })
+  })
+
+  autoUpdater.on('update-available', (info) => {
+    updateAvailable = true
+    mainWindow?.webContents.send('update-status', { 
+      status: 'available', 
+      version: info.version,
+      releaseNotes: info.releaseNotes
+    })
+    new Notification({
+      title: '发现新版本',
+      body: `AI 助手 ${info.version} 可用，点击下载更新`,
+    }).show()
+  })
+
+  autoUpdater.on('update-not-available', () => {
+    updateAvailable = false
+    mainWindow?.webContents.send('update-status', { status: 'not-available' })
+  })
+
+  autoUpdater.on('error', (err) => {
+    mainWindow?.webContents.send('update-status', { 
+      status: 'error', 
+      error: err.message 
+    })
+    console.error('更新错误:', err)
+  })
+
+  autoUpdater.on('download-progress', (progressObj) => {
+    mainWindow?.webContents.send('update-status', { 
+      status: 'downloading', 
+      progress: progressObj.percent
+    })
+  })
+
+  autoUpdater.on('update-downloaded', () => {
+    updateDownloaded = true
+    mainWindow?.webContents.send('update-status', { status: 'downloaded' })
+    new Notification({
+      title: '更新已下载',
+      body: '点击立即安装更新',
+    }).show()
+  })
+
+  checkForUpdates()
+  setInterval(checkForUpdates, CHECK_UPDATE_INTERVAL)
+}
+
+function checkForUpdates() {
+  if (!isDev) {
+    autoUpdater.checkForUpdates().catch((err) => {
+      console.error('检查更新失败:', err)
+    })
+  }
+}
+
+app.whenReady().then(() => {
+  startApiServer()
   createMenu()
   createWindow()
 
@@ -127,7 +211,8 @@ app.whenReady().then(() => {
     createTray()
   }
 
-  // 处理来自前端的通知请求
+  setupAutoUpdater()
+
   ipcMain.handle('send-notification', (event, title, body) => {
     new Notification({
       title,
@@ -159,6 +244,65 @@ app.whenReady().then(() => {
     return result === ''
   })
 
+  ipcMain.handle('get-app-version', () => {
+    return app.getVersion()
+  })
+
+  ipcMain.handle('window-minimize', () => {
+    mainWindow?.minimize()
+  })
+
+  ipcMain.handle('window-maximize', () => {
+    if (mainWindow?.isMaximized()) {
+      mainWindow.unmaximize()
+    } else {
+      mainWindow?.maximize()
+    }
+  })
+
+  ipcMain.handle('window-close', () => {
+    app.isQuitting = true
+    mainWindow?.close()
+  })
+
+  ipcMain.handle('window-fullscreen', () => {
+    if (mainWindow?.isFullScreen()) {
+      mainWindow.setFullScreen(false)
+    } else {
+      mainWindow?.setFullScreen(true)
+    }
+  })
+
+  ipcMain.handle('check-for-updates', () => {
+    if (isDev) {
+      return { status: 'dev-mode' }
+    }
+    checkForUpdates()
+    return { status: 'checking' }
+  })
+
+  ipcMain.handle('download-update', () => {
+    if (isDev) {
+      return { status: 'dev-mode' }
+    }
+    if (updateAvailable) {
+      autoUpdater.downloadUpdate()
+      return { status: 'downloading' }
+    }
+    return { status: 'no-update' }
+  })
+
+  ipcMain.handle('install-update', () => {
+    if (isDev) {
+      return { status: 'dev-mode' }
+    }
+    if (updateDownloaded) {
+      autoUpdater.quitAndInstall()
+      return { status: 'installing' }
+    }
+    return { status: 'no-update' }
+  })
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow()
@@ -174,7 +318,6 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   app.isQuitting = true
-  // 停止API服务器
   stopApiServer()
 })
 
