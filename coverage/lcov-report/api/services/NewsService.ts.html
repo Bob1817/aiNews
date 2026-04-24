@@ -23,30 +23,30 @@
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">0% </span>
+                <span class="strong">13.63% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>0/27</span>
+                <span class='fraction'>3/22</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>0/15</span>
+                <span class='fraction'>0/13</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Functions</span>
-                <span class='fraction'>0/8</span>
+                <span class='fraction'>0/6</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">0% </span>
+                <span class="strong">14.28% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>0/26</span>
+                <span class='fraction'>3/21</span>
             </div>
         
             
@@ -155,29 +155,11 @@
 <a name='L90'></a><a href='#L90'>90</a>
 <a name='L91'></a><a href='#L91'>91</a>
 <a name='L92'></a><a href='#L92'>92</a>
-<a name='L93'></a><a href='#L93'>93</a>
-<a name='L94'></a><a href='#L94'>94</a>
-<a name='L95'></a><a href='#L95'>95</a>
-<a name='L96'></a><a href='#L96'>96</a>
-<a name='L97'></a><a href='#L97'>97</a>
-<a name='L98'></a><a href='#L98'>98</a>
-<a name='L99'></a><a href='#L99'>99</a>
-<a name='L100'></a><a href='#L100'>100</a>
-<a name='L101'></a><a href='#L101'>101</a>
-<a name='L102'></a><a href='#L102'>102</a>
-<a name='L103'></a><a href='#L103'>103</a>
-<a name='L104'></a><a href='#L104'>104</a>
-<a name='L105'></a><a href='#L105'>105</a>
-<a name='L106'></a><a href='#L106'>106</a>
-<a name='L107'></a><a href='#L107'>107</a>
-<a name='L108'></a><a href='#L108'>108</a>
-<a name='L109'></a><a href='#L109'>109</a>
-<a name='L110'></a><a href='#L110'>110</a>
-<a name='L111'></a><a href='#L111'>111</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<a name='L93'></a><a href='#L93'>93</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -255,24 +237,6 @@
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -284,10 +248,10 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">import { NewsArticle, UserProfile } from '../../shared/types'
-<span class="cstat-no" title="statement not covered" >import { AICrawlerService } from './AICrawlerService'</span>
+import { AICrawlerService } from './AICrawlerService'
 &nbsp;
-<span class="cstat-no" title="statement not covered" >export class N</span>ewsService {
-  private static <span class="cstat-no" title="statement not covered" >newsArticles: NewsArticle[] = [</span>]
+export class NewsService {
+  private static newsArticles: NewsArticle[] = []
   private <span class="cstat-no" title="statement not covered" >aiCrawlerService: AICrawlerService</span>
 &nbsp;
 <span class="fstat-no" title="function not covered" >  constructor() {</span>
@@ -358,7 +322,7 @@
 <span class="cstat-no" title="statement not covered" >    return NewsService.newsArticles.slice(0, 6)</span>
   }
 &nbsp;
-  // 更新新闻源
+  // 更新新闻抓取结果
 <span class="fstat-no" title="function not covered" >  async </span>updateNewsFeeds(userId?: string, userProfile?: UserProfile): Promise&lt;void&gt; {
 <span class="cstat-no" title="statement not covered" >    console.log('Updating news feeds...')</span>
 &nbsp;
@@ -366,31 +330,13 @@
       // 使用 AI 爬虫服务更新新闻
 <span class="cstat-no" title="statement not covered" >      await this.aiCrawlerService.crawlNews(userProfile, userId)</span>
     } catch (error) {
-<span class="cstat-no" title="statement not covered" >      console.error('更新新闻源失败:', error)</span>
+<span class="cstat-no" title="statement not covered" >      console.error('更新新闻抓取结果失败:', error)</span>
     }
   }
 &nbsp;
   // 根据 ID 获取新闻
 <span class="fstat-no" title="function not covered" >  async </span>getNewsById(id: string): Promise&lt;NewsArticle | null&gt; {
 <span class="cstat-no" title="statement not covered" >    return NewsService.newsArticles.find(<span class="fstat-no" title="function not covered" >(n</span>ews: NewsArticle) =&gt; <span class="cstat-no" title="statement not covered" >news.id === id)</span> || null</span>
-  }
-&nbsp;
-  // 测试爬虫连接
-<span class="fstat-no" title="function not covered" >  async </span>testNewsAPI(_config: any): Promise&lt;{ success: boolean; message: string }&gt; {
-<span class="cstat-no" title="statement not covered" >    try {</span>
-<span class="cstat-no" title="statement not covered" >      return await this.aiCrawlerService.testCrawler()</span>
-    } catch (error) {
-      const message =
-<span class="cstat-no" title="statement not covered" >        error instanceof Error</span>
-          ? `连接失败: ${error.message}`
-          : '连接失败: 未知错误'
-<span class="cstat-no" title="statement not covered" >      return { success: false, message }</span>
-    }
-  }
-&nbsp;
-  // 获取支持的新闻源列表
-<span class="fstat-no" title="function not covered" >  getSupportedProviders(</span>) {
-<span class="cstat-no" title="statement not covered" >    return ['AI 爬虫']</span>
   }
 }
 &nbsp;</pre></td></tr></table></pre>
@@ -400,7 +346,7 @@
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-04-20T07:12:16.976Z
+                at 2026-04-23T09:28:28.581Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

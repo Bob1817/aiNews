@@ -35,11 +35,11 @@ export function apiUrl(path?: string) {
 export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     console.log('开始 API 请求:', apiUrl(path), init)
-    
+
     const response = await fetch(apiUrl(path), {
       ...init
     })
-    
+
     console.log('API 请求响应:', response.status, response.statusText)
     const contentType = response.headers.get('content-type') || ''
     const isJson = contentType.includes('application/json')
@@ -60,10 +60,50 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
     return data as T
   } catch (error) {
     console.error('API 请求错误:', error)
+
+    // 处理网络连接错误
+    if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
+      const isElectron = window.location.protocol === 'file:'
+      const apiUrlStr = apiUrl(path)
+
+      let errorMessage = '无法连接到服务器'
+      let suggestion = ''
+
+      if (isElectron) {
+        errorMessage = '无法连接到本地 API 服务器'
+        suggestion = '请确保应用已正确启动，API 服务器可能未启动或已崩溃。尝试重启应用。'
+      } else {
+        errorMessage = '无法连接到 API 服务器'
+        suggestion = '请检查网络连接，并确保服务器正在运行。'
+      }
+
+      throw new ApiError(
+        `${errorMessage} (${apiUrlStr})`,
+        0,
+        {
+          originalError: error.message,
+          suggestion,
+          isNetworkError: true,
+          isElectron,
+          apiUrl: apiUrlStr
+        }
+      )
+    }
+
     if (error instanceof DOMException && error.name === 'AbortError') {
       throw new ApiError('请求超时，请检查服务是否正在运行', 408)
     }
-    throw error
+
+    // 重新抛出其他错误
+    if (error instanceof ApiError) {
+      throw error
+    }
+
+    throw new ApiError(
+      error instanceof Error ? error.message : '未知错误',
+      0,
+      error
+    )
   }
 }
 

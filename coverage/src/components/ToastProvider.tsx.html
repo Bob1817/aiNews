@@ -32,7 +32,7 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>0/11</span>
+                <span class='fraction'>0/15</span>
             </div>
         
             
@@ -172,7 +172,13 @@
 <a name='L107'></a><a href='#L107'>107</a>
 <a name='L108'></a><a href='#L108'>108</a>
 <a name='L109'></a><a href='#L109'>109</a>
-<a name='L110'></a><a href='#L110'>110</a></td><td class="line-coverage quiet"><span class="cline-any cline-no">&nbsp;</span>
+<a name='L110'></a><a href='#L110'>110</a>
+<a name='L111'></a><a href='#L111'>111</a>
+<a name='L112'></a><a href='#L112'>112</a>
+<a name='L113'></a><a href='#L113'>113</a>
+<a name='L114'></a><a href='#L114'>114</a>
+<a name='L115'></a><a href='#L115'>115</a>
+<a name='L116'></a><a href='#L116'>116</a></td><td class="line-coverage quiet"><span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -255,6 +261,12 @@
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -312,11 +324,11 @@ function <span class="fstat-no" title="function not covered" >getToastIcon(</spa
 function <span class="fstat-no" title="function not covered" >getToastStyles(</span>variant: ToastVariant) {
 <span class="cstat-no" title="statement not covered" >  switch (variant) {</span>
     case 'success':
-<span class="cstat-no" title="statement not covered" >      return 'border-green-200 bg-green-50 text-green-900'</span>
+<span class="cstat-no" title="statement not covered" >      return 'border-green-200 bg-white text-slate-900'</span>
     case 'error':
-<span class="cstat-no" title="statement not covered" >      return 'border-red-200 bg-red-50 text-red-900'</span>
+<span class="cstat-no" title="statement not covered" >      return 'border-red-200 bg-white text-slate-900'</span>
     default:
-<span class="cstat-no" title="statement not covered" >      return 'border-blue-200 bg-blue-50 text-blue-900'</span>
+<span class="cstat-no" title="statement not covered" >      return 'border-blue-200 bg-white text-slate-900'</span>
   }
 }
 &nbsp;
@@ -359,25 +371,31 @@ function <span class="fstat-no" title="function not covered" >getToastStyles(</s
 <span class="cstat-no" title="statement not covered" >  return (</span>
     &lt;ToastContext.Provider value={value}&gt;
       {children}
-      &lt;div className="pointer-events-none fixed right-4 top-4 z-[100] flex w-[min(360px,calc(100vw-2rem))] flex-col gap-3"&gt;
+      &lt;div className="pointer-events-none fixed right-4 top-4 z-[100] flex w-[min(340px,calc(100vw-2rem))] flex-col gap-2.5"&gt;
         {toasts.map(<span class="fstat-no" title="function not covered" >(t</span>oast) =&gt; {
           const Icon = <span class="cstat-no" title="statement not covered" >getToastIcon(toast.variant)</span>
 &nbsp;
 <span class="cstat-no" title="statement not covered" >          return (</span>
             &lt;div
               key={toast.id}
-              className={`pointer-events-auto rounded-2xl border p-4 shadow-lg backdrop-blur-sm ${getToastStyles(toast.variant)}`}
+              className={`pointer-events-auto rounded-2xl border px-4 py-3 shadow-[0_14px_32px_rgba(15,23,42,0.08)] backdrop-blur-sm ${getToastStyles(toast.variant)}`}
             &gt;
               &lt;div className="flex items-start gap-3"&gt;
-                &lt;Icon className="mt-0.5 h-5 w-5 shrink-0" /&gt;
+                &lt;Icon className={`mt-0.5 h-4.5 w-4.5 shrink-0 ${
+                  toast.variant === 'success'
+                    ? 'text-green-600'
+                    : toast.variant === 'error'
+                      ? 'text-red-600'
+                      : 'text-blue-600'
+                }`} /&gt;
                 &lt;div className="min-w-0 flex-1"&gt;
                   &lt;p className="text-sm font-semibold"&gt;{toast.title}&lt;/p&gt;
-                  {toast.message &amp;&amp; &lt;p className="mt-1 text-sm opacity-80"&gt;{toast.message}&lt;/p&gt;}
+                  {toast.message &amp;&amp; &lt;p className="mt-1 text-sm text-slate-500"&gt;{toast.message}&lt;/p&gt;}
                 &lt;/div&gt;
                 &lt;button
                   type="button"
                   onClick={<span class="fstat-no" title="function not covered" >() =</span>&gt; <span class="cstat-no" title="statement not covered" >removeToast(toast.id)}</span>
-                  className="rounded-md p-1 opacity-60 transition-opacity hover:opacity-100"
+                  className="rounded-md p-1 text-slate-400 transition-colors hover:bg-slate-50 hover:text-slate-600"
                   aria-label="关闭提示"
                 &gt;
                   &lt;X className="h-4 w-4" /&gt;
@@ -397,7 +415,7 @@ function <span class="fstat-no" title="function not covered" >getToastStyles(</s
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-04-20T07:12:17.050Z
+                at 2026-04-23T09:28:28.671Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

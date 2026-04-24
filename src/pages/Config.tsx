@@ -28,7 +28,8 @@ import {
   testAIModel,
   updateConfig,
 } from '@/lib/api/config'
-import { getErrorMessage } from '@/lib/errors'
+import { getErrorMessage, getErrorSuggestion, isNetworkError } from '@/lib/errors'
+import { ApiErrorAlert, ApiConnectionStatus } from '@/components/ApiErrorAlert'
 
 import type { ActiveAIModelInfo, UserConfig, AIModelConfig } from '@/types'
 import { getDefaultConfigForm, getMockConfigForm } from '@/lib/fallbacks'
@@ -211,7 +212,27 @@ export function Config() {
   })
   const [isTestingNewModel, setIsTestingNewModel] = useState(false)
   const [isSavingNewModel, setIsSavingNewModel] = useState(false)
+  const [apiConnectionError, setApiConnectionError] = useState<unknown>(null)
+  const [isCheckingApi, setIsCheckingApi] = useState(false)
+  const [lastApiCheck, setLastApiCheck] = useState<Date | null>(null)
   const { showToast } = useToast()
+
+  const checkApiConnection = async () => {
+    setIsCheckingApi(true)
+    setApiConnectionError(null)
+
+    try {
+      // 尝试获取配置来测试API连接
+      await getConfig('1')
+      setApiConnectionError(null)
+      setLastApiCheck(new Date())
+    } catch (error) {
+      console.error('API连接检查失败:', error)
+      setApiConnectionError(error)
+    } finally {
+      setIsCheckingApi(false)
+    }
+  }
 
   const fetchOllamaModels = async () => {
     if (newModel.provider === 'ollama' && newModel.baseUrl) {
@@ -238,7 +259,11 @@ export function Config() {
         const normalized = normalizeConfigState(data)
         setConfig(normalized)
         setPersistedConfig(normalized)
-      } catch (_error) {
+        setApiConnectionError(null)
+        setLastApiCheck(new Date())
+      } catch (error) {
+        console.error('获取配置失败:', error)
+        setApiConnectionError(error)
         const fallback = {
           ...getMockConfigForm(),
           aiModels: [],
@@ -431,9 +456,21 @@ export function Config() {
         variant: 'success',
       })
     } catch (error) {
+      let title = '保存失败'
+      let message = getErrorMessage(error, '请稍后重试')
+
+      // 如果是网络错误，提供更具体的指导
+      if (isNetworkError(error)) {
+        title = '无法连接到服务器'
+        const suggestion = getErrorSuggestion(error)
+        if (suggestion) {
+          message = `${message} ${suggestion}`
+        }
+      }
+
       showToast({
-        title: '保存失败',
-        message: getErrorMessage(error, '请稍后重试'),
+        title,
+        message,
         variant: 'error',
       })
     } finally {
@@ -474,9 +511,21 @@ export function Config() {
         variant: 'success',
       })
     } catch (error) {
+      let title = '保存配置失败'
+      let message = getErrorMessage(error, '请稍后重试')
+
+      // 如果是网络错误，提供更具体的指导
+      if (isNetworkError(error)) {
+        title = '无法连接到服务器'
+        const suggestion = getErrorSuggestion(error)
+        if (suggestion) {
+          message = `${message} ${suggestion}`
+        }
+      }
+
       showToast({
-        title: '保存配置失败',
-        message: getErrorMessage(error, '请稍后重试'),
+        title,
+        message,
         variant: 'error',
       })
     } finally {
@@ -512,13 +561,24 @@ export function Config() {
         }, 600)
       }
     } catch (error) {
-      const message = getErrorMessage(error, '请稍后重试')
+      let title = '测试连接失败'
+      let message = getErrorMessage(error, '请稍后重试')
+
+      // 如果是网络错误，提供更具体的指导
+      if (isNetworkError(error)) {
+        title = '无法连接到服务器'
+        const suggestion = getErrorSuggestion(error)
+        if (suggestion) {
+          message = `${message} ${suggestion}`
+        }
+      }
+
       setTestResults((current) => ({
         ...current,
         [platform]: `测试失败: ${message}`,
       }))
       showToast({
-        title: '测试连接失败',
+        title,
         message,
         variant: 'error',
       })
@@ -623,11 +683,35 @@ export function Config() {
           <div className="flex-1">
             <h1 className="text-2xl font-semibold text-slate-900">系统配置</h1>
           </div>
+          <div className="flex items-center gap-3">
+            <ApiConnectionStatus
+              isConnected={!apiConnectionError}
+              isLoading={isCheckingApi}
+              lastChecked={lastApiCheck || undefined}
+            />
+            <button
+              onClick={checkApiConnection}
+              disabled={isCheckingApi}
+              className="focus-ring inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700 transition-colors hover:bg-slate-100 disabled:opacity-60"
+            >
+              <RefreshCw className={`h-4 w-4 ${isCheckingApi ? 'animate-spin' : ''}`} />
+              检查连接
+            </button>
+          </div>
         </div>
       </div>
 
       <div className="flex-1 overflow-y-auto px-6 py-6">
         <div className="mx-auto grid w-full max-w-6xl gap-6 xl:grid-cols-[1.25fr_0.75fr]">
+          {Boolean(apiConnectionError) && (
+            <div className="xl:col-span-2">
+              <ApiErrorAlert
+                error={apiConnectionError}
+                title="API 服务器连接失败"
+                onRetry={checkApiConnection}
+              />
+            </div>
+          )}
           <div className="space-y-6">
             <ConfigCard
               icon={<Server className="h-5 w-5" />}
