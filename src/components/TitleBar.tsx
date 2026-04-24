@@ -15,26 +15,32 @@ export function TitleBar() {
   const [isMacOS, setIsMacOS] = useState(false)
 
   useEffect(() => {
-    const hasElectron = typeof window !== 'undefined' && window.electronAPI
+    const hasElectron = typeof window !== 'undefined' && !!window.electronAPI
     setIsElectron(hasElectron)
 
     // 检测是否是 macOS 平台
     let isDarwin = navigator.platform.toUpperCase().indexOf('MAC') >= 0
-    if (hasElectron && window.electronAPI?.platform) {
+    if (hasElectron && window.electronAPI.platform) {
       isDarwin = window.electronAPI.platform === 'darwin'
     }
     setIsMacOS(isDarwin)
 
     if (hasElectron) {
-      window.electronAPI.getAppVersion().then(version => {
+      window.electronAPI.getAppVersion().then((version: string) => {
         setAppVersion(version)
       })
 
-      const unsubscribeUpdate = window.electronAPI.onUpdateStatus((status) => {
+      const unsubscribeUpdate = window.electronAPI.onUpdateStatus((status: {
+        status: 'checking' | 'available' | 'not-available' | 'error' | 'downloading' | 'downloaded' | 'dev-mode' | 'no-update' | 'installing'
+        version?: string
+        releaseNotes?: string
+        error?: string
+        progress?: number
+      }) => {
         setUpdateStatus(status)
       })
 
-      const unsubscribeWindow = window.electronAPI.onWindowStateChanged((state) => {
+      const unsubscribeWindow = window.electronAPI.onWindowStateChanged((state: 'maximized' | 'unmaximized' | 'fullscreen' | 'unfullscreen') => {
         if (state === 'maximized' || state === 'fullscreen') {
           setWindowState(state)
         } else {
