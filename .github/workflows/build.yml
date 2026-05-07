@@ -69,7 +69,11 @@ jobs:
         with:
           tag_name: nightly
           name: Nightly Build
-          files: release/**/*
+          files: |
+            release/*.exe
+            release/*.dmg
+            release/*.zip
+            release/*.blockmap
           draft: false
           prerelease: true
         env:
@@ -96,7 +100,11 @@ jobs:
           body: |
             ## Release ${{ github.ref_name }}
             See the [CHANGELOG](https://github.com/${{ github.repository }}/blob/master/CHANGELOG.md) for details.
-          files: release/**/*
+          files: |
+            release/*.exe
+            release/*.dmg
+            release/*.zip
+            release/*.blockmap
           draft: false
           prerelease: false
         env:
