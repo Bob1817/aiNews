@@ -109,12 +109,6 @@
         "portable"
       ]
     },
-    "linux": {
-      "target": [
-        "AppImage",
-        "deb"
-      ]
-    },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
