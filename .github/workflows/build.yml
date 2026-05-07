@@ -49,7 +49,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.os }}-build
-          path: release/
+          path: |
+            release/*.exe
+            release/*.dmg
+            release/*.zip
+            release/*.blockmap
+            release/*.yml
 
   release-nightly:
     needs: build
@@ -69,11 +74,7 @@ jobs:
         with:
           tag_name: nightly
           name: Nightly Build
-          files: |
-            release/*.exe
-            release/*.dmg
-            release/*.zip
-            release/*.blockmap
+          files: release/*
           draft: false
           prerelease: true
         env:
@@ -100,11 +101,7 @@ jobs:
           body: |
             ## Release ${{ github.ref_name }}
             See the [CHANGELOG](https://github.com/${{ github.repository }}/blob/master/CHANGELOG.md) for details.
-          files: |
-            release/*.exe
-            release/*.dmg
-            release/*.zip
-            release/*.blockmap
+          files: release/*
           draft: false
           prerelease: false
         env:
