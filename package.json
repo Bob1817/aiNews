@@ -94,7 +94,8 @@
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
-      "dist-api/**/*"
+      "dist-api/**/*",
+      "build/**/*"
     ],
     "mac": {
       "category": "public.app-category.productivity",
@@ -111,7 +112,13 @@
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "include": "build/installer.nsh",
+      "deleteAppDataOnUninstall": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "AI 助手",
+      "artifactName": "AI-助手-Setup-${version}.exe"
     },
     "publish": {
       "provider": "generic",

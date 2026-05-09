@@ -3,6 +3,8 @@ import { autoUpdater } from 'electron-updater'
 import path from 'path'
 import { fork, ChildProcess } from 'child_process'
 import { createMenu } from './menu'
+import { WindowsSetup } from './windows-setup'
+import { StartupCheck } from './startup-check'
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
@@ -16,8 +18,33 @@ const CHECK_UPDATE_INTERVAL = 24 * 60 * 60 * 1000 // 24小时
 function startApiServer() {
   if (!isDev) {
     try {
-      const apiServerPath = path.join(__dirname, '../dist-api/api/index.js')
-      console.log('启动API服务器:', apiServerPath)
+      // 检查可能的 API 服务器路径
+      const possiblePaths = [
+        path.join(__dirname, '../dist-api/api/index.js'),
+        path.join(__dirname, '..', 'dist-api', 'api', 'index.js'),
+        path.join(process.resourcesPath, 'dist-api', 'api', 'index.js'),
+        path.join(app.getAppPath(), 'dist-api', 'api', 'index.js'),
+      ]
+
+      let apiServerPath: string | null = null
+      for (const p of possiblePaths) {
+        if (require('fs').existsSync(p)) {
+          apiServerPath = p
+          break
+        }
+      }
+
+      if (!apiServerPath) {
+        console.error('❌ 找不到 API 服务器文件')
+        console.error('尝试过的路径:', possiblePaths)
+        dialog.showErrorBox(
+          '启动错误',
+          '无法找到 API 服务器文件。请重新安装应用。'
+        )
+        return
+      }
+
+      console.log('✅ 找到API服务器:', apiServerPath)
 
       apiServerProcess = fork(apiServerPath, [], {
         stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
@@ -30,25 +57,39 @@ function startApiServer() {
       })
 
       apiServerProcess.stdout?.on('data', (data) => {
-        console.log(`API服务器输出: ${data}`)
+        console.log(`[API] ${data}`)
       })
 
       apiServerProcess.stderr?.on('data', (data) => {
-        console.error(`API服务器错误: ${data}`)
+        console.error(`[API Error] ${data}`)
       })
 
       apiServerProcess.on('error', (err) => {
-        console.error('API服务器启动失败:', err)
+        console.error('❌ API服务器启动失败:', err)
+        dialog.showErrorBox(
+          'API 服务器错误',
+          `无法启动 API 服务器: ${err.message}`
+        )
       })
 
       apiServerProcess.on('exit', (code, signal) => {
-        console.log(`API服务器退出，代码: ${code}, 信号: ${signal}`)
+        console.log(`⚠️ API服务器退出，代码: ${code}, 信号: ${signal}`)
         apiServerProcess = null
+        if (code !== 0 && code !== null) {
+          dialog.showErrorBox(
+            'API 服务器异常',
+            `API 服务器异常退出（代码: ${code}）。请重启应用。`
+          )
+        }
       })
 
-      console.log('API服务器启动成功')
+      console.log('✅ API服务器进程已启动')
     } catch (error) {
-      console.error('启动API服务器时出错:', error)
+      console.error('❌ 启动API服务器时出错:', error)
+      dialog.showErrorBox(
+        '启动错误',
+        `启动 API 服务器失败: ${error instanceof Error ? error.message : '未知错误'}`
+      )
     }
   } else {
     console.log('开发模式：使用外部API服务器（通过 npm run dev:full 启动）')
@@ -202,8 +243,39 @@ function checkForUpdates() {
   }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  // Windows 平台：执行首次启动修复
+  if (process.platform === 'win32') {
+    console.log('🪟 Windows 平台，检查首次启动设置...')
+    const setupSuccess = await WindowsSetup.performSetup()
+    if (!setupSuccess) {
+      WindowsSetup.showSetupResult(false)
+      // 继续启动，但记录错误
+    }
+  }
+
+  // 执行启动检查
+  console.log('🔍 执行启动检查...')
+  const checkResult = await StartupCheck.performChecks()
+  if (!checkResult.success) {
+    StartupCheck.showCheckResult(checkResult)
+  }
+
   startApiServer()
+
+  // 等待 API 服务器就绪
+  const apiReady = await StartupCheck.waitForApiServer()
+  if (!apiReady) {
+    dialog.showErrorBox(
+      '启动失败',
+      'API 服务器启动失败。请检查：\n\n' +
+      '1. 是否有其他程序占用端口 3001\n' +
+      '2. 是否以管理员身份运行\n' +
+      '3. 系统环境是否正常\n\n' +
+      '如问题持续，请重新安装应用。'
+    )
+  }
+
   createMenu()
   createWindow()
 

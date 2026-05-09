@@ -1,4 +1,5 @@
 import express from 'express'
+import cors from 'cors'
 import { env } from '../shared/config/index'
 
 import { newsRoutes } from './routes/news'
@@ -15,6 +16,26 @@ const HOST = env.HOST || '0.0.0.0'
 
 // 信任代理（生产环境可能需要）
 app.set('trust proxy', 1)
+
+// CORS 配置 - 允许 Electron 应用和开发环境
+const corsOrigins = env.CORS_ORIGINS.split(',').map(origin => origin.trim())
+// 在生产环境中，允许 null origin（Electron file:// 协议）
+const allowedOrigins = [...corsOrigins, 'null']
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // 允许没有 origin 的请求（如 Electron 应用）
+    if (!origin) return callback(null, true)
+    // 允许配置的 origin
+    if (allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
+      return callback(null, true)
+    }
+    callback(new Error('Not allowed by CORS'))
+  },
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
+}))
 
 // 基础中间件
 app.use(express.json({ limit: '10mb' }))
