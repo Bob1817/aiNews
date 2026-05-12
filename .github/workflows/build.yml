@@ -30,7 +30,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20'
           cache: 'npm'
 
       - name: Install dependencies
@@ -44,9 +44,18 @@ jobs:
 
       - name: Build Electron app
         run: npm run electron:build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: List release directory
+        if: always()
+        run: |
+          echo "Release directory contents:"
+          ls -la release/ || echo "No release directory found"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: ${{ matrix.os }}-build
           path: |
@@ -55,6 +64,8 @@ jobs:
             release/*.zip
             release/*.blockmap
             release/*.yml
+            release/latest*.yml
+          if-no-files-found: warn
 
   release-nightly:
     needs: build
@@ -68,6 +79,11 @@ jobs:
         with:
           path: release
           merge-multiple: true
+
+      - name: List downloaded artifacts
+        run: |
+          echo "Downloaded artifacts:"
+          ls -la release/
 
       - name: Create or update nightly release
         uses: softprops/action-gh-release@v2
@@ -92,6 +108,11 @@ jobs:
         with:
           path: release
           merge-multiple: true
+
+      - name: List downloaded artifacts
+        run: |
+          echo "Downloaded artifacts:"
+          ls -la release/
 
       - name: Create official release
         uses: softprops/action-gh-release@v2
