@@ -113,12 +113,15 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "include": "build/installer.nsh",
       "deleteAppDataOnUninstall": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "AI 助手",
-      "artifactName": "AI-助手-Setup-${version}.exe"
+      "artifactName": "AI-助手-Setup-${version}.exe",
+      "guid": "com.ainews.tool",
+      "multiLanguageInstaller": true,
+      "language": "2052",
+      "installerLanguages": ["zh_CN", "en_US"]
     },
     "publish": {
       "provider": "generic",
