@@ -16,9 +16,6 @@ permissions:
   contents: write
   packages: write
 
-env:
-  NODE_ENV: production
-
 jobs:
   build:
     runs-on: ${{ matrix.os }}
@@ -36,24 +33,52 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
+      - name: Check environment
+        shell: bash
+        run: |
+          echo "Node version: $(node -v)"
+          echo "NPM version: $(npm -v)"
+          echo "TypeScript version: $(npx tsc -v)"
+          echo "Current directory: $(pwd)"
+          echo "Directory contents:"
+          ls -la
+
       - name: Install dependencies
         run: npm ci
 
+      - name: Check TypeScript config
+        shell: bash
+        run: |
+          echo "Checking tsconfig.api.json:"
+          cat tsconfig.api.json
+          echo ""
+          echo "Checking if api directory exists:"
+          ls -la api/ | head -20
+
       - name: Build API
-        run: npm run build:api
-        env:
-          NODE_ENV: production
+        shell: bash
+        run: |
+          echo "Starting API build..."
+          npm run build:api 2>&1 || {
+            echo "Build failed with exit code $?"
+            echo "Checking for TypeScript errors..."
+            npx tsc -p tsconfig.api.json --noEmit 2>&1 || true
+            exit 1
+          }
+
+      - name: Check API build output
+        shell: bash
+        run: |
+          echo "Checking dist-api directory:"
+          ls -la dist-api/ 2>/dev/null || echo "dist-api directory not found"
 
       - name: Build frontend
         run: npm run build
-        env:
-          NODE_ENV: production
 
       - name: Build Electron app
         run: npm run electron:build
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NODE_ENV: production
 
       - name: List release directory
         if: always()
@@ -70,9 +95,6 @@ jobs:
           else
             echo "No release directory found"
           fi
-          echo ""
-          echo "Checking for dist directories:"
-          ls -la dist* 2>/dev/null || echo "No dist directories"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
