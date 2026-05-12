@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
+const cors_1 = __importDefault(require("cors"));
 const index_1 = require("../shared/config/index");
 const news_1 = require("./routes/news");
 const ai_1 = require("./routes/ai");
@@ -17,6 +18,25 @@ const PORT = index_1.env.PORT;
 const HOST = index_1.env.HOST || '0.0.0.0';
 // 信任代理（生产环境可能需要）
 app.set('trust proxy', 1);
+// CORS 配置 - 允许 Electron 应用和开发环境
+const corsOrigins = index_1.env.CORS_ORIGINS.split(',').map(origin => origin.trim());
+// 在生产环境中，允许 null origin（Electron file:// 协议）
+const allowedOrigins = [...corsOrigins, 'null'];
+app.use((0, cors_1.default)({
+    origin: (origin, callback) => {
+        // 允许没有 origin 的请求（如 Electron 应用）
+        if (!origin)
+            return callback(null, true);
+        // 允许配置的 origin
+        if (allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
+            return callback(null, true);
+        }
+        callback(new Error('Not allowed by CORS'));
+    },
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: true
+}));
 // 基础中间件
 app.use(express_1.default.json({ limit: '10mb' }));
 app.use(express_1.default.urlencoded({ extended: true, limit: '10mb' }));

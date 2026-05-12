@@ -16,6 +16,9 @@ permissions:
   contents: write
   packages: write
 
+env:
+  NODE_ENV: production
+
 jobs:
   build:
     runs-on: ${{ matrix.os }}
@@ -38,20 +41,38 @@ jobs:
 
       - name: Build API
         run: npm run build:api
+        env:
+          NODE_ENV: production
 
       - name: Build frontend
         run: npm run build
+        env:
+          NODE_ENV: production
 
       - name: Build Electron app
         run: npm run electron:build
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_ENV: production
 
       - name: List release directory
         if: always()
+        shell: bash
         run: |
-          echo "Release directory contents:"
-          ls -la release/ || echo "No release directory found"
+          echo "Current directory: $(pwd)"
+          echo "Listing all files:"
+          ls -la
+          echo ""
+          echo "Checking for release directory:"
+          if [ -d "release" ]; then
+            echo "Release directory found:"
+            ls -la release/
+          else
+            echo "No release directory found"
+          fi
+          echo ""
+          echo "Checking for dist directories:"
+          ls -la dist* 2>/dev/null || echo "No dist directories"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -59,12 +80,10 @@ jobs:
         with:
           name: ${{ matrix.os }}-build
           path: |
-            release/*.exe
-            release/*.dmg
-            release/*.zip
-            release/*.blockmap
-            release/*.yml
-            release/latest*.yml
+            release/**
+            dist/**
+            dist-electron/**
+            dist-api/**
           if-no-files-found: warn
 
   release-nightly:
@@ -77,12 +96,14 @@ jobs:
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          path: release
+          path: artifacts
           merge-multiple: true
 
-      - name: List downloaded artifacts
+      - name: Organize artifacts
         run: |
-          echo "Downloaded artifacts:"
+          mkdir -p release
+          find artifacts -type f \( -name "*.exe" -o -name "*.dmg" -o -name "*.zip" -o -name "*.blockmap" -o -name "*.yml" \) -exec cp {} release/ \;
+          echo "Release artifacts:"
           ls -la release/
 
       - name: Create or update nightly release
@@ -106,12 +127,14 @@ jobs:
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          path: release
+          path: artifacts
           merge-multiple: true
 
-      - name: List downloaded artifacts
+      - name: Organize artifacts
         run: |
-          echo "Downloaded artifacts:"
+          mkdir -p release
+          find artifacts -type f \( -name "*.exe" -o -name "*.dmg" -o -name "*.zip" -o -name "*.blockmap" -o -name "*.yml" \) -exec cp {} release/ \;
+          echo "Release artifacts:"
           ls -la release/
 
       - name: Create official release
