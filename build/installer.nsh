@@ -12,8 +12,13 @@ RequestExecutionLevel admin
 
   ; 1. 添加 Windows 防火墙规则
   DetailPrint "[1/6] 配置 Windows 防火墙..."
-  ExecShell "" "netsh" "advfirewall firewall add rule name=\"AI News Tool API\" dir=in action=allow protocol=tcp localport=3001 program=\$\"$INSTDIR\AI 助手.exe\" enable=yes" SW_HIDE
-  DetailPrint "✓ 防火墙规则配置完成"
+  nsExec::ExecToLog "netsh advfirewall firewall add rule name=\"AI News Tool API\" dir=in action=allow protocol=tcp localport=3001"
+  Pop $0
+  ${If} $0 == 0
+    DetailPrint "✓ 防火墙规则添加成功"
+  ${Else}
+    DetailPrint "⚠ 防火墙规则可能已存在或添加失败，继续..."
+  ${EndIf}
 
   ; 2. 创建用户数据目录
   DetailPrint "[2/6] 创建用户数据目录..."
@@ -58,7 +63,8 @@ RequestExecutionLevel admin
 
   ; 移除 Windows 防火墙规则
   DetailPrint "移除 Windows 防火墙规则..."
-  ExecShell "" "netsh" "advfirewall firewall delete rule name=\"AI News Tool API\"" SW_HIDE
+  nsExec::ExecToLog "netsh advfirewall firewall delete rule name=\"AI News Tool API\""
+  Pop $0
   DetailPrint "✓ 防火墙规则已移除"
 
   ; 询问是否删除用户数据
